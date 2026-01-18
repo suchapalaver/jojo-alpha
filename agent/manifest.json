@@ -1,0 +1,6 @@
+{
+  "name": "defi-trading-agent",
+  "version": "0.1.0",
+  "description": "AI-powered DeFi trading agent using The Graph and Odos",
+  "entry_point": "dist/index.js"
+}
