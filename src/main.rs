@@ -80,6 +80,9 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load .env file if present (ignore if not found)
+    dotenvy::dotenv().ok();
+
     let cli = Cli::parse();
 
     // Initialize logging
