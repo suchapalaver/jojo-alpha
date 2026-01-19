@@ -25,9 +25,10 @@
             # Rust toolchain
             rustToolchain
 
-            # Build essentials
+            # Build essentials (gcc provides cc)
             pkg-config
             cmake
+            gcc
             clang
 
             # For bindgen (quickjs-sys)

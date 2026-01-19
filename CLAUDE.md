@@ -67,8 +67,11 @@ cargo run -- run --agent ./agent
 
 ## Environment Variables
 
+- `GRAPH_API_KEY`: The Graph decentralized network API key (required for subgraph queries)
 - `OPENROUTER_API_KEY`: For LLM inference via OpenRouter
 - `PRIVATE_KEY`: Wallet private key (hex, optional 0x prefix)
+
+Get a Graph API key at: https://thegraph.com/studio/
 
 ## Testing Notes
 

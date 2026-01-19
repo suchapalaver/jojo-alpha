@@ -3,6 +3,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// The Graph API key environment variable name
+pub const GRAPH_API_KEY_ENV: &str = "GRAPH_API_KEY";
+
 /// Supported blockchain networks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -50,27 +53,83 @@ impl Protocol {
     }
 }
 
+/// The Graph subgraph IDs for decentralized network
+pub struct SubgraphIds;
+
+impl SubgraphIds {
+    /// Uniswap V3 subgraph IDs on The Graph decentralized network
+    pub const UNISWAP_V3_ETHEREUM: &'static str = "5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV";
+    pub const UNISWAP_V3_ARBITRUM: &'static str = "FbCGRftH4a3yZugY7TnbYgPJVEv2LvMT6oF1fxPe9aJM";
+    pub const UNISWAP_V3_OPTIMISM: &'static str = "Cghf4LfVqPiFw6fp6Y5X5Ubc8UpmUhSfJL82zwiBFLaj";
+    pub const UNISWAP_V3_BASE: &'static str = "43Hwfi3dJSoGpyas9VwNoDAv28pNwMgNGVi8CKNS9r6R";
+}
+
 /// The Graph subgraph endpoints
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubgraphEndpoints {
     pub endpoints: HashMap<(Network, Protocol), String>,
 }
 
-impl Default for SubgraphEndpoints {
-    fn default() -> Self {
+impl SubgraphEndpoints {
+    /// Build endpoints using The Graph decentralized network with API key
+    pub fn with_api_key(api_key: &str) -> Self {
         let mut endpoints = HashMap::new();
 
-        // Uniswap V3
+        // Uniswap V3 on The Graph decentralized network
         endpoints.insert(
             (Network::Ethereum, Protocol::UniswapV3),
-            "https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3".to_string(),
+            format!(
+                "https://gateway.thegraph.com/api/{}/subgraphs/id/{}",
+                api_key,
+                SubgraphIds::UNISWAP_V3_ETHEREUM
+            ),
         );
         endpoints.insert(
             (Network::Arbitrum, Protocol::UniswapV3),
-            "https://api.thegraph.com/subgraphs/name/ianlapham/uniswap-arbitrum-one".to_string(),
+            format!(
+                "https://gateway.thegraph.com/api/{}/subgraphs/id/{}",
+                api_key,
+                SubgraphIds::UNISWAP_V3_ARBITRUM
+            ),
+        );
+        endpoints.insert(
+            (Network::Optimism, Protocol::UniswapV3),
+            format!(
+                "https://gateway.thegraph.com/api/{}/subgraphs/id/{}",
+                api_key,
+                SubgraphIds::UNISWAP_V3_OPTIMISM
+            ),
+        );
+        endpoints.insert(
+            (Network::Base, Protocol::UniswapV3),
+            format!(
+                "https://gateway.thegraph.com/api/{}/subgraphs/id/{}",
+                api_key,
+                SubgraphIds::UNISWAP_V3_BASE
+            ),
         );
 
         Self { endpoints }
+    }
+
+    /// Try to build endpoints from GRAPH_API_KEY environment variable
+    pub fn from_env() -> Option<Self> {
+        std::env::var(GRAPH_API_KEY_ENV).ok().map(|key| Self::with_api_key(&key))
+    }
+}
+
+impl Default for SubgraphEndpoints {
+    fn default() -> Self {
+        // Try to load from environment, fall back to placeholder
+        Self::from_env().unwrap_or_else(|| {
+            let mut endpoints = HashMap::new();
+            // Placeholder - requires GRAPH_API_KEY to be set
+            endpoints.insert(
+                (Network::Ethereum, Protocol::UniswapV3),
+                "https://gateway.thegraph.com/api/YOUR_API_KEY/subgraphs/id/5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV".to_string(),
+            );
+            Self { endpoints }
+        })
     }
 }
 
