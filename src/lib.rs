@@ -14,6 +14,7 @@
 
 pub mod graphql;
 pub mod interceptors;
+pub mod runner;
 pub mod tools;
 pub mod wallet;
 
@@ -22,3 +23,4 @@ mod error;
 
 pub use config::Config;
 pub use error::{Error, Result};
+pub use runner::AgentRunner;

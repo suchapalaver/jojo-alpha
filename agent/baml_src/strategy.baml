@@ -40,8 +40,8 @@ class RiskParameters {
 
 class QueryPoolsAction {
   action "query_pools" @description("Need more pool data before deciding")
-  protocol string @description("Protocol: uniswap_v3")
-  network string @description("Network: ethereum, arbitrum")
+  protocol_name string @description("Protocol: uniswap_v3")
+  network_name string @description("Network: ethereum, arbitrum")
   reason string @description("Why more data is needed")
 }
 
@@ -61,9 +61,6 @@ class WaitAction {
   reason string @description("Why waiting is the best action")
 }
 
-// Union type for LLM to choose from
-type TradingAction = QueryPoolsAction | SwapAction | WaitAction
-
 // ============================================================
 // Trade Analysis
 // ============================================================
@@ -77,15 +74,33 @@ class TradeAnalysis {
 }
 
 // ============================================================
-// Strategy Functions
+// Input types for functions
 // ============================================================
 
-function InferStrategy(
+class StrategyInput {
   pools PoolData[]
   market MarketConditions
   positions Position[]
   risk_params RiskParameters
-) -> TradingAction {
+}
+
+class TradeAnalysisInput {
+  quote_details string @description("JSON string of the swap quote")
+  pool_data string @description("JSON string of pool metrics")
+  historical_context string @description("Recent price movements and trends")
+}
+
+class MarketClassificationInput {
+  eth_price_24h_change float
+  total_volume_change float
+  fear_greed_index int @description("0-100, where 0 is extreme fear")
+}
+
+// ============================================================
+// Strategy Functions
+// ============================================================
+
+function InferStrategy(input: StrategyInput) -> SwapAction | QueryPoolsAction | WaitAction {
   client StrategyLLM
   prompt #"
     You are a DeFi trading strategist managing a USDC-denominated portfolio.
@@ -94,27 +109,26 @@ function InferStrategy(
     ## Current Market Data
 
     ### Top Pools
-    {% for pool in pools %}
+    {% for pool in input.pools %}
     - {{ pool.token0_symbol }}/{{ pool.token1_symbol }} ({{ pool.fee_tier / 10000 }}% fee)
-      TVL: ${{ pool.tvl_usd | round(0) | number_format }}
-      24h Volume: ${{ pool.volume_24h_usd | round(0) | number_format }}
-      Volume/TVL Ratio: {{ (pool.volume_24h_usd / pool.tvl_usd) | round(3) }}
+      TVL: ${{ pool.tvl_usd }}
+      24h Volume: ${{ pool.volume_24h_usd }}
     {% endfor %}
 
     ### Market Conditions
-    - ETH Price: ${{ market.eth_price_usd }}
-    - Gas Price: {{ market.gas_price_gwei }} gwei
-    - Sentiment: {{ market.market_sentiment }}
+    - ETH Price: ${{ input.market.eth_price_usd }}
+    - Gas Price: {{ input.market.gas_price_gwei }} gwei
+    - Sentiment: {{ input.market.market_sentiment }}
 
     ### Your Current Positions
-    {% for pos in positions %}
-    - {{ pos.token }}: ${{ pos.value_usd | round(2) }}
+    {% for pos in input.positions %}
+    - {{ pos.token }}: ${{ pos.value_usd }}
     {% endfor %}
 
     ### Risk Parameters
-    - Max trade size: ${{ risk_params.max_trade_usd }}
-    - Max slippage: {{ risk_params.max_slippage_percent }}%
-    - Allowed networks: {{ risk_params.preferred_networks | join(", ") }}
+    - Max trade size: ${{ input.risk_params.max_trade_usd }}
+    - Max slippage: {{ input.risk_params.max_slippage_percent }}%
+    - Allowed networks: {{ input.risk_params.preferred_networks }}
 
     ## Strategy Guidelines
     1. Volume/TVL ratio > 0.1 indicates an active, liquid pool
@@ -131,26 +145,24 @@ function InferStrategy(
     - "wait": If conditions are unfavorable
 
     Be conservative. Only recommend swaps with solid reasoning.
+
+    {{ ctx.output_format }}
   "#
 }
 
-function AnalyzeTrade(
-  quote_details string @description("JSON string of the swap quote")
-  pool_data string @description("JSON string of pool metrics")
-  historical_context string @description("Recent price movements and trends")
-) -> TradeAnalysis {
+function AnalyzeTrade(input: TradeAnalysisInput) -> TradeAnalysis {
   client StrategyLLM
   prompt #"
     You are a DeFi risk analyst. Analyze this potential trade and provide a recommendation.
 
     ## Swap Quote
-    {{ quote_details }}
+    {{ input.quote_details }}
 
     ## Pool Metrics
-    {{ pool_data }}
+    {{ input.pool_data }}
 
     ## Historical Context
-    {{ historical_context }}
+    {{ input.historical_context }}
 
     ## Analysis Framework
     1. **Price Impact**: Is slippage acceptable?
@@ -165,21 +177,19 @@ function AnalyzeTrade(
     - Recommendation (execute/skip/reduce_size)
     - Detailed reasoning
     - List of specific concerns
+
+    {{ ctx.output_format }}
   "#
 }
 
-function ClassifyMarketConditions(
-  eth_price_24h_change float
-  total_volume_change float
-  fear_greed_index int @description("0-100, where 0 is extreme fear")
-) -> MarketConditions {
+function ClassifyMarketConditions(input: MarketClassificationInput) -> MarketConditions {
   client FastLLM
   prompt #"
     Based on the following metrics, classify the current market conditions:
 
-    - ETH 24h price change: {{ eth_price_24h_change }}%
-    - Total DeFi volume change: {{ total_volume_change }}%
-    - Fear & Greed Index: {{ fear_greed_index }}
+    - ETH 24h price change: {{ input.eth_price_24h_change }}%
+    - Total DeFi volume change: {{ input.total_volume_change }}%
+    - Fear & Greed Index: {{ input.fear_greed_index }}
 
     Determine:
     1. Current ETH price in USD (estimate from change)
@@ -187,5 +197,7 @@ function ClassifyMarketConditions(
     3. Overall market sentiment (bullish/bearish/neutral)
 
     Be objective and data-driven.
+
+    {{ ctx.output_format }}
   "#
 }

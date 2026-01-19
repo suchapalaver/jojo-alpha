@@ -211,12 +211,14 @@ async function inferStrategy(
   positions: Position[],
   risk: RiskParameters
 ): Promise<TradingAction> {
-  // Call the BAML InferStrategy function
+  // Call the BAML InferStrategy function with input wrapper
   const result = await InferStrategy({
-    pools,
-    market,
-    positions,
-    risk_params: risk,
+    input: {
+      pools,
+      market,
+      positions,
+      risk_params: risk,
+    }
   });
 
   return result as TradingAction;
@@ -300,9 +302,11 @@ async function getQuote(action: { input_token: string; output_token: string; amo
  */
 async function analyzeTrade(quote: any, action: any): Promise<TradeAnalysis> {
   const result = await AnalyzeTrade({
-    quote_details: JSON.stringify(quote),
-    pool_data: JSON.stringify({ network: action.network }),
-    historical_context: "Recent market has been stable",
+    input: {
+      quote_details: JSON.stringify(quote),
+      pool_data: JSON.stringify({ network: action.network }),
+      historical_context: "Recent market has been stable",
+    }
   });
 
   return result as TradeAnalysis;

@@ -132,7 +132,10 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run_agent(_agent_path: PathBuf, config: Config, dry_run: bool) -> Result<()> {
+async fn run_agent(agent_path: PathBuf, config: Config, dry_run: bool) -> Result<()> {
+    use defi_trading_agent::AgentRunner;
+    use defi_trading_agent::wallet::SecureWallet;
+
     tracing::info!(
         networks = ?config.networks,
         protocols = ?config.protocols,
@@ -140,15 +143,26 @@ async fn run_agent(_agent_path: PathBuf, config: Config, dry_run: bool) -> Resul
         "Starting trading agent"
     );
 
-    if dry_run {
-        tracing::warn!("Dry run mode - no trades will be executed");
+    // Create the agent runner
+    let mut runner = AgentRunner::new(config, dry_run);
+
+    // Try to load wallet from environment if available
+    if let Ok(private_key) = std::env::var("PRIVATE_KEY") {
+        match SecureWallet::from_hex(&private_key) {
+            Ok(wallet) => {
+                tracing::info!(address = %wallet.address(), "Loaded wallet from PRIVATE_KEY");
+                runner = runner.with_wallet(wallet);
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to load wallet from PRIVATE_KEY");
+            }
+        }
+    } else if !dry_run {
+        tracing::warn!("No PRIVATE_KEY set - running in read-only mode (quotes only)");
     }
 
-    // TODO: Load agent package and run trading loop
-    // This will be implemented when we integrate with baml-rt
-    tracing::info!("Agent runner not yet implemented");
-
-    Ok(())
+    // Run the agent
+    runner.run(&agent_path).await
 }
 
 async fn run_query(
