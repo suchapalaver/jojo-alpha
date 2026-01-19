@@ -13,7 +13,10 @@ use alloy::signers::local::PrivateKeySigner;
 use serde::Serialize;
 
 /// A prepared transaction ready for signing
+///
+/// Used when executing swaps through the interceptor pipeline.
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)] // Will be used when transaction execution is implemented
 pub struct PreparedTransaction {
     pub to: Address,
     pub data: Bytes,
