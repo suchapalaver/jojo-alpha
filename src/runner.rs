@@ -78,7 +78,10 @@ impl AgentRunner {
     }
 
     /// Load agent from a directory
-    fn load_from_directory(&self, dir: &Path) -> Result<(std::path::PathBuf, Option<std::path::PathBuf>)> {
+    fn load_from_directory(
+        &self,
+        dir: &Path,
+    ) -> Result<(std::path::PathBuf, Option<std::path::PathBuf>)> {
         let baml_src = dir.join("baml_src");
         if !baml_src.exists() {
             return Err(crate::Error::Config(format!(
@@ -126,7 +129,10 @@ impl AgentRunner {
     }
 
     /// Load agent from a tar.gz file
-    fn load_from_tarball(&self, tarball: &Path) -> Result<(std::path::PathBuf, Option<std::path::PathBuf>)> {
+    fn load_from_tarball(
+        &self,
+        tarball: &Path,
+    ) -> Result<(std::path::PathBuf, Option<std::path::PathBuf>)> {
         use flate2::read::GzDecoder;
         use tar::Archive;
 
@@ -240,7 +246,9 @@ impl AgentRunner {
                 ),
             )
             .await
-            .map_err(|e| crate::Error::BamlRuntime(format!("Failed to register query_subgraph: {}", e)))?;
+            .map_err(|e| {
+                crate::Error::BamlRuntime(format!("Failed to register query_subgraph: {}", e))
+            })?;
 
         // Register Odos tool
         bridge_guard
@@ -256,7 +264,9 @@ impl AgentRunner {
                 ),
             )
             .await
-            .map_err(|e| crate::Error::BamlRuntime(format!("Failed to register odos_swap: {}", e)))?;
+            .map_err(|e| {
+                crate::Error::BamlRuntime(format!("Failed to register odos_swap: {}", e))
+            })?;
 
         // Now we need to register the actual Rust tools with the BAML manager
         // This is done through the runtime's BAML manager
@@ -271,7 +281,11 @@ impl AgentRunner {
     }
 
     /// Load and execute the agent's JavaScript code
-    async fn load_agent_code(&self, bridge: &Arc<Mutex<QuickJSBridge>>, js_path: &Path) -> Result<()> {
+    async fn load_agent_code(
+        &self,
+        bridge: &Arc<Mutex<QuickJSBridge>>,
+        js_path: &Path,
+    ) -> Result<()> {
         let code = std::fs::read_to_string(js_path)
             .map_err(|e| crate::Error::Config(format!("Failed to read agent code: {}", e)))?;
 
@@ -346,7 +360,10 @@ impl AgentRunner {
             }
             Err(e) => {
                 error!(error = %e, "Trading loop failed");
-                Err(crate::Error::BamlRuntime(format!("Trading loop failed: {}", e)))
+                Err(crate::Error::BamlRuntime(format!(
+                    "Trading loop failed: {}",
+                    e
+                )))
             }
         }
     }

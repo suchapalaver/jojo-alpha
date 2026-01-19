@@ -114,7 +114,9 @@ impl SubgraphEndpoints {
 
     /// Try to build endpoints from GRAPH_API_KEY environment variable
     pub fn from_env() -> Option<Self> {
-        std::env::var(GRAPH_API_KEY_ENV).ok().map(|key| Self::with_api_key(&key))
+        std::env::var(GRAPH_API_KEY_ENV)
+            .ok()
+            .map(|key| Self::with_api_key(&key))
     }
 }
 

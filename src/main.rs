@@ -133,8 +133,8 @@ async fn main() -> Result<()> {
 }
 
 async fn run_agent(agent_path: PathBuf, config: Config, dry_run: bool) -> Result<()> {
-    use defi_trading_agent::AgentRunner;
     use defi_trading_agent::wallet::SecureWallet;
+    use defi_trading_agent::AgentRunner;
 
     tracing::info!(
         networks = ?config.networks,
