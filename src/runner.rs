@@ -7,10 +7,11 @@ use crate::config::Config;
 use crate::interceptors::{
     AuditLogInterceptor, CooldownInterceptor, SlippageGuardInterceptor, SpendLimitInterceptor,
 };
+use crate::tools::{OdosTool, TheGraphTool};
 use crate::wallet::SecureWallet;
 use crate::Result;
 use baml_rt::quickjs_bridge::QuickJSBridge;
-use baml_rt::RuntimeBuilder;
+use baml_rt::{Runtime, RuntimeBuilder};
 use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
@@ -64,7 +65,7 @@ impl AgentRunner {
             .quickjs_bridge()
             .ok_or_else(|| crate::Error::BamlRuntime("QuickJS bridge not available".to_string()))?;
 
-        self.register_tools(&bridge).await?;
+        self.register_tools(&runtime, &bridge).await?;
 
         // Load and execute agent JavaScript
         if let Some(js_path) = js_entry {
@@ -221,10 +222,12 @@ impl AgentRunner {
         Ok(runtime)
     }
 
-    /// Register Rust tools with the QuickJS bridge
-    async fn register_tools(&self, bridge: &Arc<Mutex<QuickJSBridge>>) -> Result<()> {
-        let mut bridge_guard = bridge.lock().await;
-
+    /// Register Rust tools with the QuickJS bridge and BAML manager
+    async fn register_tools(
+        &self,
+        runtime: &Runtime,
+        bridge: &Arc<Mutex<QuickJSBridge>>,
+    ) -> Result<()> {
         // Get wallet address for Odos tool
         let wallet_address = self
             .wallet
@@ -232,49 +235,43 @@ impl AgentRunner {
             .map(|w| w.address_string())
             .unwrap_or_else(|| "0x0000000000000000000000000000000000000000".to_string());
 
-        // Register The Graph tool as a JavaScript helper
-        bridge_guard
-            .register_js_tool(
-                "query_subgraph",
-                &format!(
-                    r#"
-                async function(args) {{
-                    // Forward to the Rust tool via invokeTool
-                    return await __tool_invoke("query_subgraph", JSON.stringify(args));
-                }}
-                "#
-                ),
-            )
-            .await
-            .map_err(|e| {
-                crate::Error::BamlRuntime(format!("Failed to register query_subgraph: {}", e))
-            })?;
+        // Register the actual Rust tools with the BAML manager's tool registry
+        // This allows __tool_invoke to dispatch to these tools
+        {
+            let baml_manager = runtime.baml_manager();
+            let manager_guard = baml_manager.lock().await;
+            let tool_registry = manager_guard.tool_registry();
+            let mut registry_guard = tool_registry.lock().await;
 
-        // Register Odos tool
-        bridge_guard
-            .register_js_tool(
-                "odos_swap",
-                &format!(
-                    r#"
-                async function(args) {{
-                    // Forward to the Rust tool via invokeTool
-                    return await __tool_invoke("odos_swap", JSON.stringify(args));
-                }}
-                "#
-                ),
-            )
-            .await
-            .map_err(|e| {
-                crate::Error::BamlRuntime(format!("Failed to register odos_swap: {}", e))
+            // Register The Graph tool
+            let the_graph_tool = TheGraphTool::new();
+            registry_guard.register(the_graph_tool).map_err(|e| {
+                crate::Error::BamlRuntime(format!("Failed to register TheGraphTool: {}", e))
             })?;
+            info!("Registered TheGraphTool with BAML manager");
 
-        // Now we need to register the actual Rust tools with the BAML manager
-        // This is done through the runtime's BAML manager
-        drop(bridge_guard);
+            // Register Odos tool
+            let odos_tool = OdosTool::try_new(&wallet_address).map_err(|e| {
+                crate::Error::BamlRuntime(format!("Failed to create OdosTool: {}", e))
+            })?;
+            registry_guard.register(odos_tool).map_err(|e| {
+                crate::Error::BamlRuntime(format!("Failed to register OdosTool: {}", e))
+            })?;
+            info!("Registered OdosTool with BAML manager");
+        }
+
+        // Note: JavaScript wrapper functions are NOT needed here because:
+        // 1. Rust tools are registered with the BAML manager's tool registry above
+        // 2. The global `invokeTool` function (registered by QuickJS bridge) automatically
+        //    dispatches to Rust tools via `__tool_invoke` when a tool name doesn't exist
+        //    as a JavaScript function
+        // 3. The agent code calls invokeTool("query_subgraph", {...}) which correctly
+        //    routes to the registered TheGraphTool
+        _ = bridge; // Silence unused variable warning
 
         info!(
             wallet_address = wallet_address,
-            "Registered tools with QuickJS"
+            "Registered tools with QuickJS and BAML manager"
         );
 
         Ok(())
@@ -335,14 +332,20 @@ impl AgentRunner {
 
         let mut bridge_guard = bridge.lock().await;
 
-        // Call runTradingLoop(config) in JavaScript
+        // Start the trading loop without waiting for it to complete.
+        // runTradingLoop runs forever (infinite while loop), so we:
+        // 1. Start the loop (it returns a promise immediately)
+        // 2. Continuously drive the QuickJS event loop to allow async code to run
         let js_code = format!(
             r#"
-            (async function() {{
+            (function() {{
                 const config = {};
                 if (typeof runTradingLoop === 'function') {{
-                    await runTradingLoop(config);
-                    return JSON.stringify({{ status: "completed" }});
+                    // Start the trading loop - don't await, let it run in background
+                    runTradingLoop(config).catch(function(err) {{
+                        console.error("Trading loop fatal error:", err);
+                    }});
+                    return JSON.stringify({{ status: "started" }});
                 }} else {{
                     return JSON.stringify({{ error: "runTradingLoop not found" }});
                 }}
@@ -351,20 +354,31 @@ impl AgentRunner {
             serde_json::to_string(&trading_config).unwrap()
         );
 
+        // Start the trading loop
         let result = bridge_guard.evaluate(&js_code).await;
 
         match result {
             Ok(value) => {
-                info!(result = %value, "Trading loop completed");
-                Ok(())
+                info!(result = %value, "Trading loop started");
             }
             Err(e) => {
-                error!(error = %e, "Trading loop failed");
-                Err(crate::Error::BamlRuntime(format!(
-                    "Trading loop failed: {}",
+                error!(error = %e, "Failed to start trading loop");
+                return Err(crate::Error::BamlRuntime(format!(
+                    "Failed to start trading loop: {}",
                     e
-                )))
+                )));
             }
+        }
+
+        // Keep the QuickJS event loop running to drive async operations
+        // This loop will run forever, driving the trading agent
+        info!("Entering main event loop to drive trading agent...");
+        loop {
+            // Drive the QuickJS event loop
+            bridge_guard.drive_event_loop().await;
+
+            // Small delay to prevent busy-waiting
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
     }
 }
