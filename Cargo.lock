@@ -3300,6 +3300,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "flate2",
+ "futures",
  "graphql_client",
  "odos-sdk",
  "reqwest 0.12.28",

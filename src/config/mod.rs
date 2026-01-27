@@ -1,7 +1,12 @@
 //! Configuration for the DeFi trading agent
 
+pub mod rpc;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+// Re-export RPC config
+pub use rpc::RpcConfig;
 
 /// The Graph API key environment variable name
 pub const GRAPH_API_KEY_ENV: &str = "GRAPH_API_KEY";
@@ -135,6 +140,17 @@ impl Default for SubgraphEndpoints {
     }
 }
 
+/// Spend limit enforcement mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SpendLimitMode {
+    /// Allow trades when USD value cannot be determined (log warning)
+    #[default]
+    FailOpen,
+    /// Block trades when USD value cannot be determined (safer)
+    FailClosed,
+}
+
 /// Risk management configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RiskConfig {
@@ -146,15 +162,19 @@ pub struct RiskConfig {
     pub max_slippage_percent: f64,
     /// Minimum seconds between trades
     pub cooldown_seconds: u64,
+    /// Spend limit enforcement mode
+    #[serde(default)]
+    pub spend_limit_mode: SpendLimitMode,
 }
 
 impl Default for RiskConfig {
     fn default() -> Self {
         Self {
-            max_trade_usd: 100.0,      // Conservative default
-            max_daily_usd: 500.0,      // Conservative default
-            max_slippage_percent: 1.0, // 1% max slippage
-            cooldown_seconds: 300,     // 5 minutes between trades
+            max_trade_usd: 100.0,                       // Conservative default
+            max_daily_usd: 500.0,                       // Conservative default
+            max_slippage_percent: 1.0,                  // 1% max slippage
+            cooldown_seconds: 300,                      // 5 minutes between trades
+            spend_limit_mode: SpendLimitMode::FailOpen, // Default to existing behavior
         }
     }
 }

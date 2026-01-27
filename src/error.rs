@@ -30,6 +30,9 @@ pub enum Error {
 
     #[error("BAML runtime error: {0}")]
     BamlRuntime(String),
+
+    #[error("Transaction simulation failed: {0}")]
+    Simulation(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

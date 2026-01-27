@@ -12,15 +12,17 @@
 //! - Private keys never leave the Rust wallet module
 //! - Full audit trail of all operations
 
+pub mod config;
 pub mod graphql;
 pub mod interceptors;
 pub mod runner;
+pub mod tokens;
 pub mod tools;
 pub mod wallet;
 
-mod config;
 mod error;
 
-pub use config::Config;
+// Re-export commonly used types
+pub use config::{Config, RpcConfig, SpendLimitMode};
 pub use error::{Error, Result};
 pub use runner::AgentRunner;

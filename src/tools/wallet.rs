@@ -1,27 +1,25 @@
 //! Wallet balance query tool
 //!
 //! Queries native ETH and ERC20 token balances from blockchain RPCs.
+//! Uses the shared token registry and RPC configuration.
 //!
 //! SECURITY NOTE:
 //! - This tool is READ-ONLY - it only queries balances
 //! - It never accesses or exposes private keys
 //! - The wallet address is public information
 
+use crate::config::RpcConfig;
+use crate::tokens::{self, TokenInfo};
 use alloy::primitives::{Address, Bytes, U256};
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy::rpc::types::TransactionRequest;
 use async_trait::async_trait;
 use baml_rt::error::{BamlRtError, Result};
 use baml_rt::tools::BamlTool;
+use futures::future::join_all;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::str::FromStr;
-
-/// Well-known token addresses and metadata
-struct TokenInfo {
-    symbol: &'static str,
-    decimals: u8,
-}
 
 /// Tool for querying wallet balances
 pub struct WalletTool {
@@ -32,26 +30,27 @@ pub struct WalletTool {
 }
 
 impl WalletTool {
-    /// Create a new WalletTool with default public RPC endpoints
+    /// Create a new WalletTool with RPC config from environment
     pub fn new(wallet_address: &str) -> std::result::Result<Self, String> {
+        let rpc_config = RpcConfig::from_env();
+        Self::with_rpc_config(wallet_address, &rpc_config)
+    }
+
+    /// Create a WalletTool with explicit RPC configuration
+    pub fn with_rpc_config(
+        wallet_address: &str,
+        rpc_config: &RpcConfig,
+    ) -> std::result::Result<Self, String> {
         let addr = Address::from_str(wallet_address)
             .map_err(|e| format!("Invalid wallet address: {}", e))?;
 
-        let mut rpc_urls = HashMap::new();
-        // Default public RPC endpoints (rate-limited, for testing)
-        // In production, use private RPC providers like Alchemy, Infura, etc.
-        rpc_urls.insert(1, "https://eth.llamarpc.com".to_string());
-        rpc_urls.insert(42161, "https://arb1.arbitrum.io/rpc".to_string());
-        rpc_urls.insert(10, "https://mainnet.optimism.io".to_string());
-        rpc_urls.insert(8453, "https://mainnet.base.org".to_string());
-
         Ok(Self {
             wallet_address: addr,
-            rpc_urls,
+            rpc_urls: rpc_config.to_hashmap(),
         })
     }
 
-    /// Create with custom RPC URLs
+    /// Create with custom RPC URLs (for testing)
     pub fn with_rpc_urls(
         wallet_address: &str,
         rpc_urls: HashMap<u64, String>,
@@ -65,90 +64,24 @@ impl WalletTool {
         })
     }
 
-    /// Get well-known token info for common tokens
-    fn get_token_info(chain_id: u64, address: &Address) -> Option<TokenInfo> {
-        // Stablecoins and major tokens with known decimals
-        let addr_str = address.to_string().to_lowercase();
+    /// Get token info from the shared registry
+    fn get_token_info(chain_id: u64, address: &Address) -> Option<&'static TokenInfo> {
+        // First check the shared registry
+        tokens::registry().get(address).or_else(|| {
+            // Fall back to chain-specific lookup for tokens that might have
+            // different addresses on different chains
+            let addr_str = address.to_string().to_lowercase();
 
-        match chain_id {
-            1 => {
-                // Ethereum mainnet
-                match addr_str.as_str() {
-                    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" => Some(TokenInfo {
-                        symbol: "USDC",
-                        decimals: 6,
-                    }),
-                    "0xdac17f958d2ee523a2206206994597c13d831ec7" => Some(TokenInfo {
-                        symbol: "USDT",
-                        decimals: 6,
-                    }),
-                    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" => Some(TokenInfo {
-                        symbol: "WETH",
-                        decimals: 18,
-                    }),
-                    "0x6b175474e89094c44da98b954eedeac495271d0f" => Some(TokenInfo {
-                        symbol: "DAI",
-                        decimals: 18,
-                    }),
-                    "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599" => Some(TokenInfo {
-                        symbol: "WBTC",
-                        decimals: 8,
-                    }),
+            // WETH has the same address on Optimism and Base
+            if addr_str == "0x4200000000000000000000000000000000000006" {
+                match chain_id {
+                    10 | 8453 => tokens::registry().get(&tokens::addresses::WETH_OPT),
                     _ => None,
                 }
+            } else {
+                None
             }
-            42161 => {
-                // Arbitrum
-                match addr_str.as_str() {
-                    "0xaf88d065e77c8cc2239327c5edb3a432268e5831" => Some(TokenInfo {
-                        symbol: "USDC",
-                        decimals: 6,
-                    }),
-                    "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9" => Some(TokenInfo {
-                        symbol: "USDT",
-                        decimals: 6,
-                    }),
-                    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1" => Some(TokenInfo {
-                        symbol: "WETH",
-                        decimals: 18,
-                    }),
-                    _ => None,
-                }
-            }
-            10 => {
-                // Optimism
-                match addr_str.as_str() {
-                    "0x0b2c639c533813f4aa9d7837caf62653d097ff85" => Some(TokenInfo {
-                        symbol: "USDC",
-                        decimals: 6,
-                    }),
-                    "0x94b008aa00579c1307b0ef2c499ad98a8ce58e58" => Some(TokenInfo {
-                        symbol: "USDT",
-                        decimals: 6,
-                    }),
-                    "0x4200000000000000000000000000000000000006" => Some(TokenInfo {
-                        symbol: "WETH",
-                        decimals: 18,
-                    }),
-                    _ => None,
-                }
-            }
-            8453 => {
-                // Base
-                match addr_str.as_str() {
-                    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" => Some(TokenInfo {
-                        symbol: "USDC",
-                        decimals: 6,
-                    }),
-                    "0x4200000000000000000000000000000000000006" => Some(TokenInfo {
-                        symbol: "WETH",
-                        decimals: 18,
-                    }),
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
+        })
     }
 
     /// Convert chain name to chain ID
@@ -229,7 +162,7 @@ impl WalletTool {
             U256::ZERO
         };
 
-        // Get token info from known tokens or use defaults
+        // Get token info from shared registry
         let (decimals, symbol) = if let Some(info) = Self::get_token_info(chain_id, &token_addr) {
             (info.decimals, info.symbol.to_string())
         } else {
@@ -250,51 +183,44 @@ impl WalletTool {
         }))
     }
 
-    /// Get balances for all common tokens on a network
+    /// Get balances for all common tokens on a network (parallelized)
     async fn get_all_balances(&self, chain_id: u64) -> Result<Value> {
+        // Get native ETH balance first
+        let native_balance = self.get_native_balance(chain_id).await;
+
+        // Get tokens for this chain from the shared registry
+        let token_addresses = tokens::registry().tokens_for_chain(chain_id);
+
+        // Convert to owned strings to avoid lifetime issues with async closures
+        let token_addr_strings: Vec<String> =
+            token_addresses.iter().map(|a| a.to_string()).collect();
+        let num_tokens = token_addr_strings.len();
+
+        // Query all token balances in parallel
+        let token_futures: Vec<_> = token_addr_strings
+            .iter()
+            .map(|addr_str| self.get_token_balance(chain_id, addr_str))
+            .collect();
+
+        let token_results = join_all(token_futures).await;
+
+        // Collect results
         let mut balances = Vec::new();
 
-        // Get native ETH balance
-        match self.get_native_balance(chain_id).await {
+        // Add native balance if successful
+        match native_balance {
             Ok(bal) => balances.push(bal),
             Err(e) => {
                 tracing::warn!("Failed to get native balance: {}", e);
             }
         }
 
-        // Get common token balances based on chain
-        let tokens: Vec<&str> = match chain_id {
-            1 => vec![
-                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", // USDC
-                "0xdac17f958d2ee523a2206206994597c13d831ec7", // USDT
-                "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", // WETH
-                "0x6b175474e89094c44da98b954eedeac495271d0f", // DAI
-            ],
-            42161 => vec![
-                "0xaf88d065e77c8cc2239327c5edb3a432268e5831", // USDC
-                "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", // USDT
-                "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
-            ],
-            10 => vec![
-                "0x0b2c639c533813f4aa9d7837caf62653d097ff85", // USDC
-                "0x94b008aa00579c1307b0ef2c499ad98a8ce58e58", // USDT
-                "0x4200000000000000000000000000000000000006", // WETH
-            ],
-            8453 => vec![
-                "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", // USDC
-                "0x4200000000000000000000000000000000000006", // WETH
-            ],
-            _ => vec![],
-        };
-
-        // Store count before iterating
-        let token_count = tokens.len();
-
-        for token in tokens {
-            match self.get_token_balance(chain_id, token).await {
+        // Add token balances
+        for result in token_results {
+            match result {
                 Ok(bal) => balances.push(bal),
                 Err(e) => {
-                    tracing::warn!("Failed to get balance for {}: {}", token, e);
+                    tracing::warn!("Failed to get token balance: {}", e);
                 }
             }
         }
@@ -314,7 +240,7 @@ impl WalletTool {
             "wallet": self.wallet_address.to_string(),
             "chain_id": chain_id,
             "balances": non_zero_balances,
-            "total_tokens_checked": token_count + 1 // +1 for native
+            "total_tokens_checked": num_tokens + 1 // +1 for native
         }))
     }
 }
@@ -450,7 +376,10 @@ mod tests {
 
     #[test]
     fn test_input_schema() {
-        let tool = WalletTool::new("0x0000000000000000000000000000000000000000").unwrap();
+        let mut urls = HashMap::new();
+        urls.insert(1, "https://test.rpc".to_string());
+        let tool =
+            WalletTool::with_rpc_urls("0x0000000000000000000000000000000000000000", urls).unwrap();
         let schema = tool.input_schema();
 
         assert_eq!(schema["type"], "object");
@@ -460,17 +389,17 @@ mod tests {
     }
 
     #[test]
-    fn test_get_token_info() {
-        // USDC on Ethereum
-        let usdc_eth = Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
-        let info = WalletTool::get_token_info(1, &usdc_eth).unwrap();
-        assert_eq!(info.symbol, "USDC");
-        assert_eq!(info.decimals, 6);
+    fn test_get_token_info_from_registry() {
+        // USDC on Ethereum should be found
+        let usdc_info = WalletTool::get_token_info(1, &tokens::addresses::USDC_ETH);
+        assert!(usdc_info.is_some());
+        assert_eq!(usdc_info.unwrap().symbol, "USDC");
+        assert_eq!(usdc_info.unwrap().decimals, 6);
 
-        // WETH on Arbitrum
-        let weth_arb = Address::from_str("0x82af49447d8a07e3bd95bd0d56f35241523fbab1").unwrap();
-        let info = WalletTool::get_token_info(42161, &weth_arb).unwrap();
-        assert_eq!(info.symbol, "WETH");
-        assert_eq!(info.decimals, 18);
+        // WETH on Arbitrum should be found
+        let weth_info = WalletTool::get_token_info(42161, &tokens::addresses::WETH_ARB);
+        assert!(weth_info.is_some());
+        assert_eq!(weth_info.unwrap().symbol, "WETH");
+        assert_eq!(weth_info.unwrap().decimals, 18);
     }
 }

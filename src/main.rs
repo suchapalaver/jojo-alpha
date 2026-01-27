@@ -76,6 +76,29 @@ enum Commands {
 
     /// Show current configuration
     Config,
+
+    /// Simulate a transaction using eth_call
+    Simulate {
+        /// Target contract address
+        #[arg(long)]
+        to: String,
+
+        /// Calldata (hex encoded, with or without 0x prefix)
+        #[arg(long)]
+        data: String,
+
+        /// From address (defaults to zero address)
+        #[arg(long)]
+        from: Option<String>,
+
+        /// Value in wei (defaults to 0)
+        #[arg(long)]
+        value: Option<String>,
+
+        /// Network (ethereum, arbitrum, optimism, base)
+        #[arg(short, long, default_value = "ethereum")]
+        network: String,
+    },
 }
 
 #[tokio::main]
@@ -129,6 +152,15 @@ async fn main() -> Result<()> {
         }
         Commands::Config => {
             println!("{}", serde_json::to_string_pretty(&config).unwrap());
+        }
+        Commands::Simulate {
+            to,
+            data,
+            from,
+            value,
+            network,
+        } => {
+            run_simulate(to, data, from, value, network).await?;
         }
     }
 
@@ -219,5 +251,70 @@ async fn run_quote(input: String, output: String, amount: String, network: Strin
         .map_err(|e| defi_trading_agent::Error::Odos(e.to_string()))?;
 
     println!("{}", serde_json::to_string_pretty(&result).unwrap());
+    Ok(())
+}
+
+async fn run_simulate(
+    to: String,
+    data: String,
+    from: Option<String>,
+    value: Option<String>,
+    network: String,
+) -> Result<()> {
+    use defi_trading_agent::config::RpcConfig;
+    use defi_trading_agent::wallet::TransactionSimulator;
+
+    let rpc_config = RpcConfig::from_env();
+
+    // Parse network to chain_id
+    let chain_id = match network.to_lowercase().as_str() {
+        "ethereum" | "mainnet" => 1,
+        "arbitrum" => 42161,
+        "optimism" => 10,
+        "base" => 8453,
+        _ => {
+            return Err(defi_trading_agent::Error::InvalidArgument(format!(
+                "Unknown network: {}",
+                network
+            )));
+        }
+    };
+
+    let simulator = TransactionSimulator::from_rpc_config(&rpc_config, chain_id)
+        .map_err(|e| defi_trading_agent::Error::Simulation(e.to_string()))?;
+
+    let from_addr =
+        from.unwrap_or_else(|| "0x0000000000000000000000000000000000000000".to_string());
+
+    tracing::info!(
+        from = %from_addr,
+        to = %to,
+        data_len = data.len(),
+        network = %network,
+        "Simulating transaction"
+    );
+
+    let result = simulator
+        .simulate(&from_addr, &to, &data, value.as_deref())
+        .await
+        .map_err(|e| defi_trading_agent::Error::Simulation(e.to_string()))?;
+
+    if result.success {
+        println!("Simulation SUCCEEDED");
+        if let Some(gas) = result.gas_used {
+            println!("  Gas used: {}", gas);
+        }
+        if let Some(data) = result.return_data {
+            if data != "0x" && !data.is_empty() {
+                println!("  Return data: {}", data);
+            }
+        }
+    } else {
+        println!("Simulation FAILED");
+        if let Some(reason) = result.revert_reason {
+            println!("  Revert reason: {}", reason);
+        }
+    }
+
     Ok(())
 }

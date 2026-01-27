@@ -180,12 +180,17 @@ impl AgentRunner {
         // Add tool interceptors for risk management
         let risk = &self.config.risk;
 
-        // 1. Spend limit interceptor
-        let spend_limit = SpendLimitInterceptor::new(risk.max_trade_usd, risk.max_daily_usd);
+        // 1. Spend limit interceptor (with configurable mode)
+        let spend_limit = SpendLimitInterceptor::with_mode(
+            risk.max_trade_usd,
+            risk.max_daily_usd,
+            risk.spend_limit_mode,
+        );
         builder = builder.with_tool_interceptor(spend_limit);
         info!(
             max_trade = risk.max_trade_usd,
             max_daily = risk.max_daily_usd,
+            mode = ?risk.spend_limit_mode,
             "Added spend limit interceptor"
         );
 
