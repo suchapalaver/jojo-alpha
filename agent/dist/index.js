@@ -1,3 +1,4 @@
+(function() {
 /**
  * DeFi Trading Agent
  *
@@ -12,8 +13,8 @@
  */
 
 // Agent state
-let isRunning = false;
-let cycleCount = 0;
+var isRunning = false;
+var cycleCount = 0;
 
 // Well-known token addresses
 const TOKENS = {
@@ -98,8 +99,8 @@ async function gatherPoolData(config) {
           for (const pool of result.pools) {
             pools.push({
               pool_id: pool.id,
-              token0_symbol: pool.token0?.symbol || "???",
-              token1_symbol: pool.token1?.symbol || "???",
+              token0_symbol: (pool.token0 && pool.token0.symbol) || "???",
+              token1_symbol: (pool.token1 && pool.token1.symbol) || "???",
               tvl_usd: parseFloat(pool.totalValueLockedUSD || "0"),
               volume_24h_usd: parseFloat(pool.volumeUSD || "0"),
               fee_tier: parseInt(pool.feeTier || "0"),
@@ -333,3 +334,4 @@ globalThis.TOKENS = TOKENS;
 
 console.log("DeFi trading agent module loaded");
 console.log("Call runTradingLoop(config) to start");
+})();
