@@ -290,6 +290,7 @@ async function getQuote(action: { input_token: string; output_token: string; amo
     input_token: action.input_token,
     output_token: action.output_token,
     amount: amount_wei,
+    amount_usd: action.amount_usd, // Pass USD value for spend limit interceptor
     network: action.network,
     slippage_percent: 0.5,
   });
@@ -323,6 +324,7 @@ async function prepareSwap(action: any, quote: any) {
     input_token: action.input_token,
     output_token: action.output_token,
     amount: amount_wei,
+    amount_usd: action.amount_usd, // Pass USD value for spend limit interceptor
     network: action.network,
     slippage_percent: 0.5,
   });
