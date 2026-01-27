@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::interceptors::{
     AuditLogInterceptor, CooldownInterceptor, SlippageGuardInterceptor, SpendLimitInterceptor,
 };
-use crate::tools::{OdosTool, TheGraphTool};
+use crate::tools::{OdosTool, TheGraphTool, WalletTool};
 use crate::wallet::SecureWallet;
 use crate::Result;
 use baml_rt::quickjs_bridge::QuickJSBridge;
@@ -258,6 +258,15 @@ impl AgentRunner {
                 crate::Error::BamlRuntime(format!("Failed to register OdosTool: {}", e))
             })?;
             info!("Registered OdosTool with BAML manager");
+
+            // Register Wallet tool
+            let wallet_tool = WalletTool::new(&wallet_address).map_err(|e| {
+                crate::Error::BamlRuntime(format!("Failed to create WalletTool: {}", e))
+            })?;
+            registry_guard.register(wallet_tool).map_err(|e| {
+                crate::Error::BamlRuntime(format!("Failed to register WalletTool: {}", e))
+            })?;
+            info!("Registered WalletTool with BAML manager");
         }
 
         // Note: JavaScript wrapper functions are NOT needed here because:

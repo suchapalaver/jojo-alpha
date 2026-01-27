@@ -5,6 +5,8 @@
 
 mod odos;
 mod the_graph;
+mod wallet;
 
 pub use odos::OdosTool;
 pub use the_graph::TheGraphTool;
+pub use wallet::WalletTool;

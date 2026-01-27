@@ -131,17 +131,59 @@ async function getMarketConditions() {
 }
 
 /**
- * Get current positions (simplified)
+ * Get current positions by querying wallet balances
  */
 async function getCurrentPositions() {
-  // In production, this would query the wallet
-  return [
-    {
-      token: "USDC",
-      balance: "5000000000", // 5000 USDC (6 decimals)
-      value_usd: 5000,
-    },
-  ];
+  const positions = [];
+
+  try {
+    // Query wallet balances for all common tokens on Ethereum
+    const result = await invokeTool("wallet_balance", {
+      action: "all_balances",
+      network: "ethereum",
+    });
+
+    if (result.balances && Array.isArray(result.balances)) {
+      for (const balance of result.balances) {
+        // Estimate USD value based on token type
+        const valueUsd = estimateUsdValue(
+          balance.symbol,
+          parseFloat(balance.balance_formatted)
+        );
+
+        positions.push({
+          token: balance.symbol,
+          balance: balance.balance_raw,
+          value_usd: valueUsd,
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Failed to query wallet balances:", error);
+    // Return empty positions on error - agent will handle this gracefully
+  }
+
+  return positions;
+}
+
+/**
+ * Estimate USD value of a token balance
+ * In production, this would use price oracles
+ */
+function estimateUsdValue(symbol, amount) {
+  // Simplified price estimation
+  // In production, query price from The Graph or price oracles
+  const prices = {
+    ETH: 3500,
+    WETH: 3500,
+    USDC: 1,
+    USDT: 1,
+    DAI: 1,
+    WBTC: 95000,
+  };
+
+  const price = prices[symbol] || 0;
+  return amount * price;
 }
 
 /**
