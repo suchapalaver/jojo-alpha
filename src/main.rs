@@ -99,6 +99,17 @@ enum Commands {
         #[arg(short, long, default_value = "ethereum")]
         network: String,
     },
+
+    /// Get real-time token price in USD via Odos
+    Price {
+        /// Token address (or multiple comma-separated addresses)
+        #[arg(long)]
+        token: String,
+
+        /// Network (ethereum, arbitrum, optimism, base)
+        #[arg(short, long, default_value = "ethereum")]
+        network: String,
+    },
 }
 
 #[tokio::main]
@@ -161,6 +172,9 @@ async fn main() -> Result<()> {
             network,
         } => {
             run_simulate(to, data, from, value, network).await?;
+        }
+        Commands::Price { token, network } => {
+            run_price(token, network).await?;
         }
     }
 
@@ -251,6 +265,49 @@ async fn run_quote(input: String, output: String, amount: String, network: Strin
         .map_err(|e| defi_trading_agent::Error::Odos(e.to_string()))?;
 
     println!("{}", serde_json::to_string_pretty(&result).unwrap());
+    Ok(())
+}
+
+async fn run_price(token: String, network: String) -> Result<()> {
+    use baml_rt::tools::BamlTool;
+    use defi_trading_agent::tools::OdosTool;
+
+    // For price lookup, we don't need a real wallet address
+    let tool = OdosTool::new("0x0000000000000000000000000000000000000000");
+
+    // Check if multiple tokens (comma-separated)
+    let tokens: Vec<&str> = token.split(',').map(|s| s.trim()).collect();
+
+    if tokens.len() > 1 {
+        // Batch price lookup
+        let args = serde_json::json!({
+            "action": "get_prices",
+            "tokens": tokens,
+            "network": network
+        });
+
+        let result = tool
+            .execute(args)
+            .await
+            .map_err(|e| defi_trading_agent::Error::Odos(e.to_string()))?;
+
+        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+    } else {
+        // Single token price
+        let args = serde_json::json!({
+            "action": "get_price",
+            "token": tokens[0],
+            "network": network
+        });
+
+        let result = tool
+            .execute(args)
+            .await
+            .map_err(|e| defi_trading_agent::Error::Odos(e.to_string()))?;
+
+        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+    }
+
     Ok(())
 }
 

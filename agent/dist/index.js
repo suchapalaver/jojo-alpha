@@ -16,6 +16,10 @@
 var isRunning = false;
 var cycleCount = 0;
 
+// Cache for token prices to avoid repeated API calls within a cycle
+var priceCache = {};
+var PRICE_CACHE_TTL_MS = 60000; // 1 minute cache
+
 // Well-known token addresses
 const TOKENS = {
   ethereum: {
@@ -119,42 +123,162 @@ async function gatherPoolData(config) {
 }
 
 /**
- * Get current market conditions
+ * Get real-time USD price for a token using Odos
+ */
+async function getTokenPrice(tokenAddress, network) {
+  if (!network) network = "ethereum";
+  var cacheKey = network + ":" + tokenAddress.toLowerCase();
+  var now = Date.now();
+
+  // Check cache
+  var cached = priceCache[cacheKey];
+  if (cached && (now - cached.timestamp) < PRICE_CACHE_TTL_MS) {
+    return cached.price;
+  }
+
+  try {
+    var result = await invokeTool("odos_swap", {
+      action: "get_price",
+      token: tokenAddress,
+      network: network,
+    });
+
+    var price = result.price_usd || 0;
+
+    // Cache the result
+    priceCache[cacheKey] = { price: price, timestamp: now };
+
+    return price;
+  } catch (error) {
+    console.error("Failed to get price for " + tokenAddress + ":", error);
+    // Return cached price if available (even if stale), otherwise 0
+    return cached ? cached.price : 0;
+  }
+}
+
+/**
+ * Get prices for multiple tokens efficiently
+ */
+async function getTokenPrices(tokenAddresses, network) {
+  if (!network) network = "ethereum";
+  var prices = {};
+  var now = Date.now();
+  var tokensToFetch = [];
+
+  // Check cache first
+  for (var i = 0; i < tokenAddresses.length; i++) {
+    var addr = tokenAddresses[i];
+    var cacheKey = network + ":" + addr.toLowerCase();
+    var cached = priceCache[cacheKey];
+    if (cached && (now - cached.timestamp) < PRICE_CACHE_TTL_MS) {
+      prices[addr.toLowerCase()] = cached.price;
+    } else {
+      tokensToFetch.push(addr);
+    }
+  }
+
+  // Fetch missing prices
+  if (tokensToFetch.length > 0) {
+    try {
+      var result = await invokeTool("odos_swap", {
+        action: "get_prices",
+        tokens: tokensToFetch,
+        network: network,
+      });
+
+      if (result.prices && Array.isArray(result.prices)) {
+        for (var j = 0; j < result.prices.length; j++) {
+          var priceResult = result.prices[j];
+          if (priceResult.token && priceResult.price_usd !== undefined) {
+            var tokenAddr = priceResult.token.toLowerCase();
+            prices[tokenAddr] = priceResult.price_usd;
+            priceCache[network + ":" + tokenAddr] = {
+              price: priceResult.price_usd,
+              timestamp: now
+            };
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Failed to get batch prices:", error);
+    }
+  }
+
+  return prices;
+}
+
+/**
+ * Get current market conditions with real-time ETH price from Odos
  */
 async function getMarketConditions() {
-  // In production, this would query price feeds and market data APIs
-  // For now, using placeholder values
+  var ethPriceUsd = 3500; // Fallback price
+
+  try {
+    // Get real-time ETH price via Odos (WETH -> USDC quote)
+    ethPriceUsd = await getTokenPrice(TOKENS.ethereum.WETH, "ethereum");
+    if (ethPriceUsd === 0) {
+      ethPriceUsd = 3500; // Use fallback if price fetch failed
+    }
+  } catch (error) {
+    console.error("Failed to get ETH price:", error);
+  }
+
+  // Gas price would ideally come from an RPC call
+  // For now, using a reasonable estimate
+  var gasPriceGwei = 30;
+
+  // Sentiment could be derived from price trends
+  // For now, using neutral
+  var marketSentiment = "neutral";
+
   return {
-    eth_price_usd: 3500, // Would query from price oracle
-    gas_price_gwei: 30, // Would query from network
-    market_sentiment: "neutral",
+    eth_price_usd: ethPriceUsd,
+    gas_price_gwei: gasPriceGwei,
+    market_sentiment: marketSentiment,
   };
 }
 
 /**
- * Get current positions by querying wallet balances
+ * Get current positions by querying wallet balances with real-time prices
  */
 async function getCurrentPositions() {
-  const positions = [];
+  var positions = [];
 
   try {
     // Query wallet balances for all common tokens on Ethereum
-    const result = await invokeTool("wallet_balance", {
+    var result = await invokeTool("wallet_balance", {
       action: "all_balances",
       network: "ethereum",
     });
 
     if (result.balances && Array.isArray(result.balances)) {
-      for (const balance of result.balances) {
-        // Estimate USD value based on token type
-        const valueUsd = estimateUsdValue(
-          balance.symbol,
-          parseFloat(balance.balance_formatted)
-        );
+      // Collect token addresses for batch price lookup
+      var tokenAddresses = [];
+      for (var i = 0; i < result.balances.length; i++) {
+        var balance = result.balances[i];
+        if (balance.address) {
+          tokenAddresses.push(balance.address);
+        }
+      }
+
+      // Get real-time prices for all tokens
+      var prices = await getTokenPrices(tokenAddresses, "ethereum");
+
+      for (var j = 0; j < result.balances.length; j++) {
+        var bal = result.balances[j];
+        var amount = parseFloat(bal.balance_formatted);
+        var valueUsd;
+
+        // Use real price if available, otherwise fall back to estimate
+        if (bal.address && prices[bal.address.toLowerCase()] !== undefined) {
+          valueUsd = amount * prices[bal.address.toLowerCase()];
+        } else {
+          valueUsd = estimateUsdValue(bal.symbol, amount);
+        }
 
         positions.push({
-          token: balance.symbol,
-          balance: balance.balance_raw,
+          token: bal.symbol,
+          balance: bal.balance_raw,
           value_usd: valueUsd,
         });
       }
@@ -168,22 +292,23 @@ async function getCurrentPositions() {
 }
 
 /**
- * Estimate USD value of a token balance
- * In production, this would use price oracles
+ * Estimate USD value of a token balance (fallback when Odos price unavailable)
+ * Primary pricing now uses real-time Odos quotes via getTokenPrice/getTokenPrices
  */
 function estimateUsdValue(symbol, amount) {
-  // Simplified price estimation
-  // In production, query price from The Graph or price oracles
-  const prices = {
+  // Stablecoins are always $1
+  if (symbol === "USDC" || symbol === "USDT" || symbol === "DAI") {
+    return amount * 1;
+  }
+
+  // Fallback prices for when Odos quote fails
+  var fallbackPrices = {
     ETH: 3500,
     WETH: 3500,
-    USDC: 1,
-    USDT: 1,
-    DAI: 1,
     WBTC: 95000,
   };
 
-  const price = prices[symbol] || 0;
+  var price = fallbackPrices[symbol] || 0;
   return amount * price;
 }
 

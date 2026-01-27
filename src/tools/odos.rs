@@ -1,12 +1,14 @@
 //! Odos DEX aggregator tool
 //!
-//! Wraps the odos-sdk crate to provide swap quotes and transaction preparation.
+//! Wraps the odos-sdk crate to provide swap quotes, transaction preparation,
+//! and real-time token pricing.
 //!
 //! SECURITY NOTE:
 //! - This tool only prepares transactions, it NEVER signs them
 //! - Signing happens in the SecureWallet module after interceptor approval
 //! - The tool has no access to private keys
 
+use crate::tokens::{addresses, registry};
 use alloy::primitives::{Address, U256};
 use async_trait::async_trait;
 use baml_rt::error::{BamlRtError, Result};
@@ -237,6 +239,141 @@ impl OdosTool {
         }))
     }
 
+    /// Get real-time token price in USD via Odos quote to USDC
+    ///
+    /// For stablecoins, returns $1 without making an API call.
+    /// For other tokens, quotes 1 unit of the token to USDC.
+    async fn get_price(&self, args: &Value) -> Result<Value> {
+        let token = args
+            .get("token")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'token'".to_string()))?;
+
+        let chain_id = args.get("chain_id").and_then(|v| v.as_u64()).unwrap_or(1);
+
+        let token_addr = Address::from_str(token)
+            .map_err(|e| BamlRtError::InvalidArgument(format!("Invalid token address: {}", e)))?;
+
+        // Check if it's a known stablecoin - return $1 immediately
+        let token_registry = registry();
+        if let Some(info) = token_registry.get(&token_addr) {
+            if info.is_stablecoin {
+                return Ok(json!({
+                    "action": "get_price",
+                    "token": token,
+                    "symbol": info.symbol,
+                    "price_usd": 1.0,
+                    "source": "stablecoin",
+                    "chain_id": chain_id,
+                }));
+            }
+        }
+
+        // Get the USDC address for this chain
+        let usdc_addr = Self::usdc_for_chain(chain_id).ok_or_else(|| {
+            BamlRtError::InvalidArgument(format!("No USDC address for chain {}", chain_id))
+        })?;
+
+        // Get token decimals (default to 18 for unknown tokens)
+        let decimals = token_registry
+            .get(&token_addr)
+            .map(|info| info.decimals)
+            .unwrap_or(18);
+
+        // Quote 1 unit of the token to USDC
+        let one_unit = U256::from(10).pow(U256::from(decimals));
+
+        let chain = Self::chain_from_id(chain_id).ok_or_else(|| {
+            BamlRtError::InvalidArgument(format!("Unsupported chain ID: {}", chain_id))
+        })?;
+
+        // Use a small slippage just for price discovery
+        let slippage = Slippage::percent(1.0)
+            .map_err(|e| BamlRtError::InvalidArgument(format!("Invalid slippage: {}", e)))?;
+
+        let quote = self
+            .client
+            .swap()
+            .chain(chain)
+            .from_token(token_addr, one_unit)
+            .to_token(usdc_addr)
+            .slippage(slippage)
+            .signer(self.wallet_address)
+            .quote()
+            .await
+            .map_err(|e| BamlRtError::ToolExecution(format!("Odos price quote failed: {}", e)))?;
+
+        // Parse USDC output amount (6 decimals)
+        let usdc_out_str = quote.out_amount().unwrap_or(&"0".to_string()).to_owned();
+        let usdc_out: f64 = usdc_out_str.parse().unwrap_or(0.0);
+        let price_usd = usdc_out / 1_000_000.0; // USDC has 6 decimals
+
+        let symbol = token_registry
+            .get(&token_addr)
+            .map(|info| info.symbol)
+            .unwrap_or("UNKNOWN");
+
+        Ok(json!({
+            "action": "get_price",
+            "token": token,
+            "symbol": symbol,
+            "price_usd": price_usd,
+            "source": "odos_quote",
+            "chain_id": chain_id,
+            "price_impact_percent": quote.price_impact(),
+        }))
+    }
+
+    /// Get multiple token prices in a single call
+    async fn get_prices(&self, args: &Value) -> Result<Value> {
+        let tokens = args
+            .get("tokens")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'tokens' array".to_string()))?;
+
+        let chain_id = args.get("chain_id").and_then(|v| v.as_u64()).unwrap_or(1);
+
+        let mut prices = Vec::new();
+        for token_val in tokens {
+            let token = token_val.as_str().ok_or_else(|| {
+                BamlRtError::InvalidArgument("Token must be a string".to_string())
+            })?;
+
+            let price_args = json!({
+                "token": token,
+                "chain_id": chain_id,
+            });
+
+            match self.get_price(&price_args).await {
+                Ok(price_result) => prices.push(price_result),
+                Err(e) => {
+                    // Include error but don't fail the whole batch
+                    prices.push(json!({
+                        "token": token,
+                        "error": e.to_string(),
+                    }));
+                }
+            }
+        }
+
+        Ok(json!({
+            "action": "get_prices",
+            "chain_id": chain_id,
+            "prices": prices,
+        }))
+    }
+
+    /// Get USDC address for a chain
+    fn usdc_for_chain(chain_id: u64) -> Option<Address> {
+        match chain_id {
+            1 => Some(addresses::USDC_ETH),
+            42161 => Some(addresses::USDC_ARB),
+            10 => Some(addresses::USDC_OPT),
+            8453 => Some(addresses::USDC_BASE),
+            _ => None,
+        }
+    }
+
     fn parse_chain_id(network: &str) -> u64 {
         match network.to_lowercase().as_str() {
             "ethereum" | "mainnet" => 1,
@@ -267,10 +404,10 @@ impl BamlTool for OdosTool {
     const NAME: &'static str = "odos_swap";
 
     fn description(&self) -> &'static str {
-        "Interacts with Odos DEX aggregator for optimal swap routing. \
-         Can get quotes (safe, read-only) or prepare swap transactions \
-         (requires approval through risk interceptors). Supports Ethereum, \
-         Arbitrum, Optimism, and Base networks."
+        "Interacts with Odos DEX aggregator for optimal swap routing and real-time pricing. \
+         Actions: 'quote' (read-only swap quote), 'prepare_swap' (prepare transaction), \
+         'get_price' (get token USD price via quote), 'get_prices' (batch price lookup). \
+         Supports Ethereum, Arbitrum, Optimism, and Base networks."
     }
 
     fn input_schema(&self) -> Value {
@@ -279,20 +416,29 @@ impl BamlTool for OdosTool {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["quote", "prepare_swap"],
-                    "description": "Action to perform. 'quote' is read-only; 'prepare_swap' prepares a transaction."
+                    "enum": ["quote", "prepare_swap", "get_price", "get_prices"],
+                    "description": "Action: 'quote' for swap quote, 'prepare_swap' for tx prep, 'get_price' for single token price, 'get_prices' for batch prices"
                 },
                 "input_token": {
                     "type": "string",
-                    "description": "Input token address (use 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE for native ETH)"
+                    "description": "Input token address for quote/prepare_swap (use 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE for native ETH)"
                 },
                 "output_token": {
                     "type": "string",
-                    "description": "Output token address"
+                    "description": "Output token address for quote/prepare_swap"
                 },
                 "amount": {
                     "type": "string",
-                    "description": "Input amount in wei (as string for precision)"
+                    "description": "Input amount in wei (as string for precision) for quote/prepare_swap"
+                },
+                "token": {
+                    "type": "string",
+                    "description": "Token address for get_price action"
+                },
+                "tokens": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Array of token addresses for get_prices action"
                 },
                 "slippage_percent": {
                     "type": "number",
@@ -310,7 +456,7 @@ impl BamlTool for OdosTool {
                     "description": "Network name (alternative to chain_id)"
                 }
             },
-            "required": ["action", "input_token", "output_token", "amount"]
+            "required": ["action"]
         })
     }
 
@@ -330,8 +476,10 @@ impl BamlTool for OdosTool {
         match action {
             "quote" => self.get_quote(&args).await,
             "prepare_swap" => self.prepare_swap(&args).await,
+            "get_price" => self.get_price(&args).await,
+            "get_prices" => self.get_prices(&args).await,
             _ => Err(BamlRtError::InvalidArgument(format!(
-                "Unknown action: {}. Use 'quote' or 'prepare_swap'",
+                "Unknown action: {}. Use 'quote', 'prepare_swap', 'get_price', or 'get_prices'",
                 action
             ))),
         }
@@ -360,5 +508,68 @@ mod tests {
         assert!(schema["properties"]["input_token"].is_object());
         assert!(schema["properties"]["output_token"].is_object());
         assert!(schema["properties"]["amount"].is_object());
+    }
+
+    #[test]
+    fn test_usdc_for_chain() {
+        // Ethereum mainnet
+        let usdc_eth = OdosTool::usdc_for_chain(1);
+        assert!(usdc_eth.is_some());
+        assert_eq!(usdc_eth.unwrap(), addresses::USDC_ETH);
+
+        // Arbitrum
+        let usdc_arb = OdosTool::usdc_for_chain(42161);
+        assert!(usdc_arb.is_some());
+        assert_eq!(usdc_arb.unwrap(), addresses::USDC_ARB);
+
+        // Optimism
+        let usdc_opt = OdosTool::usdc_for_chain(10);
+        assert!(usdc_opt.is_some());
+        assert_eq!(usdc_opt.unwrap(), addresses::USDC_OPT);
+
+        // Base
+        let usdc_base = OdosTool::usdc_for_chain(8453);
+        assert!(usdc_base.is_some());
+        assert_eq!(usdc_base.unwrap(), addresses::USDC_BASE);
+
+        // Unknown chain
+        let usdc_unknown = OdosTool::usdc_for_chain(999);
+        assert!(usdc_unknown.is_none());
+    }
+
+    #[test]
+    fn test_chain_from_id() {
+        // Supported chains
+        assert!(OdosTool::chain_from_id(1).is_some()); // Ethereum
+        assert!(OdosTool::chain_from_id(42161).is_some()); // Arbitrum
+        assert!(OdosTool::chain_from_id(10).is_some()); // Optimism
+        assert!(OdosTool::chain_from_id(8453).is_some()); // Base
+        assert!(OdosTool::chain_from_id(137).is_some()); // Polygon
+        assert!(OdosTool::chain_from_id(43114).is_some()); // Avalanche
+        assert!(OdosTool::chain_from_id(56).is_some()); // BSC
+
+        // Unsupported chain
+        assert!(OdosTool::chain_from_id(999).is_none());
+    }
+
+    #[test]
+    fn test_input_schema_includes_price_actions() {
+        let tool = OdosTool::new("0x0000000000000000000000000000000000000000");
+        let schema = tool.input_schema();
+
+        // Check that action enum includes price actions
+        let action_enum = &schema["properties"]["action"]["enum"];
+        assert!(action_enum
+            .as_array()
+            .unwrap()
+            .contains(&json!("get_price")));
+        assert!(action_enum
+            .as_array()
+            .unwrap()
+            .contains(&json!("get_prices")));
+
+        // Check that price-specific properties exist
+        assert!(schema["properties"]["token"].is_object());
+        assert!(schema["properties"]["tokens"].is_object());
     }
 }

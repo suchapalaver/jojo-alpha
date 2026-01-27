@@ -176,20 +176,38 @@ async function gatherPoolData(config: TradingConfig): Promise<PoolData[]> {
 }
 
 /**
- * Get current market conditions
+ * Get current market conditions with real-time ETH price from Odos
  */
 async function getMarketConditions(): Promise<MarketConditions> {
-  // In production, this would query price feeds and market data APIs
-  // For now, using placeholder values
+  let ethPriceUsd = 3500; // Fallback price
+
+  try {
+    // Get real-time ETH price via Odos (WETH -> USDC quote)
+    ethPriceUsd = await getTokenPrice(TOKENS.ethereum.WETH, "ethereum");
+    if (ethPriceUsd === 0) {
+      ethPriceUsd = 3500; // Use fallback if price fetch failed
+    }
+  } catch (error) {
+    console.error("Failed to get ETH price:", error);
+  }
+
+  // Gas price would ideally come from an RPC call
+  // For now, using a reasonable estimate
+  const gasPriceGwei = 30;
+
+  // Sentiment could be derived from price trends
+  // For now, using neutral
+  const marketSentiment: "bullish" | "bearish" | "neutral" = "neutral";
+
   return {
-    eth_price_usd: 3500, // Would query from price oracle
-    gas_price_gwei: 30, // Would query from network
-    market_sentiment: "neutral",
+    eth_price_usd: ethPriceUsd,
+    gas_price_gwei: gasPriceGwei,
+    market_sentiment: marketSentiment,
   };
 }
 
 /**
- * Get current positions by querying wallet balances
+ * Get current positions by querying wallet balances with real-time prices
  */
 async function getCurrentPositions(): Promise<Position[]> {
   const positions: Position[] = [];
@@ -202,12 +220,27 @@ async function getCurrentPositions(): Promise<Position[]> {
     });
 
     if (result.balances && Array.isArray(result.balances)) {
+      // Collect token addresses for batch price lookup
+      const tokenAddresses: string[] = [];
       for (const balance of result.balances) {
-        // Estimate USD value based on token type
-        const valueUsd = estimateUsdValue(
-          balance.symbol,
-          parseFloat(balance.balance_formatted)
-        );
+        if (balance.address) {
+          tokenAddresses.push(balance.address);
+        }
+      }
+
+      // Get real-time prices for all tokens
+      const prices = await getTokenPrices(tokenAddresses, "ethereum");
+
+      for (const balance of result.balances) {
+        const amount = parseFloat(balance.balance_formatted);
+        let valueUsd: number;
+
+        // Use real price if available, otherwise fall back to estimate
+        if (balance.address && prices[balance.address.toLowerCase()] !== undefined) {
+          valueUsd = amount * prices[balance.address.toLowerCase()];
+        } else {
+          valueUsd = estimateUsdValue(balance.symbol, amount);
+        }
 
         positions.push({
           token: balance.symbol,
@@ -224,23 +257,110 @@ async function getCurrentPositions(): Promise<Position[]> {
   return positions;
 }
 
+// Cache for token prices to avoid repeated API calls within a cycle
+let priceCache: Record<string, { price: number; timestamp: number }> = {};
+const PRICE_CACHE_TTL_MS = 60000; // 1 minute cache
+
+/**
+ * Get real-time USD price for a token using Odos
+ */
+async function getTokenPrice(tokenAddress: string, network: string = "ethereum"): Promise<number> {
+  const cacheKey = `${network}:${tokenAddress.toLowerCase()}`;
+  const now = Date.now();
+
+  // Check cache
+  const cached = priceCache[cacheKey];
+  if (cached && (now - cached.timestamp) < PRICE_CACHE_TTL_MS) {
+    return cached.price;
+  }
+
+  try {
+    const result = await invokeTool("odos_swap", {
+      action: "get_price",
+      token: tokenAddress,
+      network: network,
+    });
+
+    const price = result.price_usd || 0;
+
+    // Cache the result
+    priceCache[cacheKey] = { price, timestamp: now };
+
+    return price;
+  } catch (error) {
+    console.error("Failed to get price for " + tokenAddress + ":", error);
+    // Return cached price if available (even if stale), otherwise 0
+    return cached ? cached.price : 0;
+  }
+}
+
+/**
+ * Get prices for multiple tokens efficiently
+ */
+async function getTokenPrices(tokenAddresses: string[], network: string = "ethereum"): Promise<Record<string, number>> {
+  const prices: Record<string, number> = {};
+  const now = Date.now();
+  const tokensToFetch: string[] = [];
+
+  // Check cache first
+  for (const addr of tokenAddresses) {
+    const cacheKey = `${network}:${addr.toLowerCase()}`;
+    const cached = priceCache[cacheKey];
+    if (cached && (now - cached.timestamp) < PRICE_CACHE_TTL_MS) {
+      prices[addr.toLowerCase()] = cached.price;
+    } else {
+      tokensToFetch.push(addr);
+    }
+  }
+
+  // Fetch missing prices
+  if (tokensToFetch.length > 0) {
+    try {
+      const result = await invokeTool("odos_swap", {
+        action: "get_prices",
+        tokens: tokensToFetch,
+        network: network,
+      });
+
+      if (result.prices && Array.isArray(result.prices)) {
+        for (const priceResult of result.prices) {
+          if (priceResult.token && priceResult.price_usd !== undefined) {
+            const addr = priceResult.token.toLowerCase();
+            prices[addr] = priceResult.price_usd;
+            priceCache[`${network}:${addr}`] = {
+              price: priceResult.price_usd,
+              timestamp: now
+            };
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Failed to get batch prices:", error);
+    }
+  }
+
+  return prices;
+}
+
 /**
  * Estimate USD value of a token balance
- * In production, this would use price oracles
+ * Uses real-time Odos prices with fallback to known values
  */
 function estimateUsdValue(symbol: string, amount: number): number {
-  // Simplified price estimation
-  // In production, query price from The Graph or price oracles
-  const prices: Record<string, number> = {
+  // Stablecoins are always $1
+  if (symbol === "USDC" || symbol === "USDT" || symbol === "DAI") {
+    return amount * 1;
+  }
+
+  // For other tokens, use fallback prices
+  // Real prices are fetched asynchronously in getCurrentPositions
+  const fallbackPrices: Record<string, number> = {
     ETH: 3500,
     WETH: 3500,
-    USDC: 1,
-    USDT: 1,
-    DAI: 1,
     WBTC: 95000,
   };
 
-  const price = prices[symbol] || 0;
+  const price = fallbackPrices[symbol] || 0;
   return amount * price;
 }
 
