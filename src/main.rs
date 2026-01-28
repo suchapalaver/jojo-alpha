@@ -284,9 +284,14 @@ async fn run_query(
     params: Option<String>,
 ) -> Result<()> {
     use baml_rt::tools::BamlTool;
+    use defi_trading_agent::config::GRAPH_API_KEY_ENV;
     use defi_trading_agent::tools::TheGraphTool;
 
-    let tool = TheGraphTool::new();
+    // Use gateway-enabled tool if API key is available
+    let tool = match std::env::var(GRAPH_API_KEY_ENV) {
+        Ok(api_key) => TheGraphTool::with_gateway(api_key),
+        Err(_) => TheGraphTool::new(),
+    };
     let params_value: serde_json::Value = params
         .map(|p| serde_json::from_str(&p).unwrap_or(serde_json::json!({})))
         .unwrap_or(serde_json::json!({}));

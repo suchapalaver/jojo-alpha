@@ -2,8 +2,19 @@
 //!
 //! Queries DeFi protocol data from The Graph's subgraphs.
 //! Supports query planning for bidirectional Graph-Inference flow.
+//!
+//! ## Gateway Integration
+//!
+//! When constructed with a gateway (`with_gateway`), queries are routed through
+//! `BasicGraphGateway` which provides:
+//! - **Caching**: Results cached with configurable TTL (default 60s)
+//! - **Latency tracking**: Query performance metrics
+//! - **Future x402 support**: Same interface for advanced routing
 
-use crate::config::{Network, Protocol, SubgraphEndpoints};
+use crate::config::{Network, Protocol, SubgraphEndpoints, SubgraphIds};
+use crate::tools::graph_gateway::{
+    BasicGraphGateway, GatewayError, GraphGateway, QueryRoutingHints,
+};
 use async_trait::async_trait;
 use baml_rt::error::{BamlRtError, Result};
 use baml_rt::tools::BamlTool;
@@ -11,6 +22,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashSet;
+use std::sync::Arc;
 
 /// Query filters for intelligent data fetching (from InferQueryPlan)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -40,30 +52,146 @@ pub struct QueryPlan {
 }
 
 /// Tool for querying The Graph subgraphs
+///
+/// Optionally uses a `GraphGateway` for caching and routing.
 pub struct TheGraphTool {
     client: Client,
     endpoints: SubgraphEndpoints,
+    /// Optional gateway for caching and x402 routing
+    gateway: Option<Arc<dyn GraphGateway>>,
 }
 
 impl TheGraphTool {
-    /// Create a new TheGraphTool with default endpoints
+    /// Create a new TheGraphTool with default endpoints (no caching)
     pub fn new() -> Self {
         Self {
             client: Client::new(),
             endpoints: SubgraphEndpoints::default(),
+            gateway: None,
         }
     }
 
-    /// Create with custom endpoints
+    /// Create with custom endpoints (no caching)
     pub fn with_endpoints(endpoints: SubgraphEndpoints) -> Self {
         Self {
             client: Client::new(),
             endpoints,
+            gateway: None,
+        }
+    }
+
+    /// Create with gateway for caching and x402 routing
+    ///
+    /// The gateway provides:
+    /// - Query result caching with configurable TTL
+    /// - Latency tracking and metrics
+    /// - Future x402 protocol support
+    ///
+    /// # Arguments
+    /// * `api_key` - The Graph API key for authentication
+    pub fn with_gateway(api_key: String) -> Self {
+        let endpoints = SubgraphEndpoints::with_api_key(&api_key);
+        Self {
+            client: Client::new(),
+            endpoints,
+            gateway: Some(Arc::new(BasicGraphGateway::new(api_key))),
+        }
+    }
+
+    /// Create with custom endpoints and gateway
+    pub fn with_endpoints_and_gateway(
+        endpoints: SubgraphEndpoints,
+        gateway: Arc<dyn GraphGateway>,
+    ) -> Self {
+        Self {
+            client: Client::new(),
+            endpoints,
+            gateway: Some(gateway),
+        }
+    }
+
+    /// Get the subgraph ID for a network/protocol combination
+    #[allow(dead_code)] // Used in tests, may be useful for future direct lookups
+    fn get_subgraph_id(network: Network, protocol: Protocol) -> Option<&'static str> {
+        match (network, protocol) {
+            (Network::Ethereum, Protocol::UniswapV3) => Some(SubgraphIds::UNISWAP_V3_ETHEREUM),
+            (Network::Arbitrum, Protocol::UniswapV3) => Some(SubgraphIds::UNISWAP_V3_ARBITRUM),
+            (Network::Optimism, Protocol::UniswapV3) => Some(SubgraphIds::UNISWAP_V3_OPTIMISM),
+            (Network::Base, Protocol::UniswapV3) => Some(SubgraphIds::UNISWAP_V3_BASE),
+            _ => None,
         }
     }
 
     /// Execute a raw GraphQL query against a subgraph
+    ///
+    /// If a gateway is configured, routes the query through the gateway for caching.
+    /// Otherwise falls back to direct HTTP requests.
     async fn query_subgraph(&self, endpoint: &str, query: &str, variables: Value) -> Result<Value> {
+        // Try to use gateway if available
+        if let Some(ref gateway) = self.gateway {
+            // Extract subgraph ID from endpoint URL
+            // Format: https://gateway.thegraph.com/api/{api_key}/subgraphs/id/{subgraph_id}
+            if let Some(subgraph_id) = Self::extract_subgraph_id(endpoint) {
+                return self
+                    .query_via_gateway(gateway, subgraph_id, query, variables)
+                    .await;
+            }
+            // If we can't extract subgraph ID, fall through to direct query
+            tracing::debug!(
+                endpoint = endpoint,
+                "Could not extract subgraph ID from endpoint, falling back to direct query"
+            );
+        }
+
+        // Direct query (no gateway or couldn't extract subgraph ID)
+        self.query_direct(endpoint, query, variables).await
+    }
+
+    /// Extract subgraph ID from a Graph API endpoint URL
+    fn extract_subgraph_id(endpoint: &str) -> Option<&str> {
+        // Format: https://gateway.thegraph.com/api/{api_key}/subgraphs/id/{subgraph_id}
+        endpoint.rsplit("/subgraphs/id/").next().and_then(|s| {
+            // Make sure we got something that looks like a subgraph ID
+            if s.len() > 20 && !s.contains('/') {
+                Some(s)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Query via gateway (with caching)
+    async fn query_via_gateway(
+        &self,
+        gateway: &Arc<dyn GraphGateway>,
+        subgraph_id: &str,
+        query: &str,
+        variables: Value,
+    ) -> Result<Value> {
+        let result = gateway
+            .query_with_routing(subgraph_id, query, variables, QueryRoutingHints::default())
+            .await
+            .map_err(Self::gateway_error_to_baml_error)?;
+
+        if result.cached {
+            tracing::debug!(
+                subgraph_id = subgraph_id,
+                latency_ms = result.latency_ms,
+                "Served from gateway cache"
+            );
+        } else {
+            tracing::debug!(
+                subgraph_id = subgraph_id,
+                latency_ms = result.latency_ms,
+                "Fresh query via gateway"
+            );
+        }
+
+        Ok(result.data)
+    }
+
+    /// Direct HTTP query (no caching)
+    async fn query_direct(&self, endpoint: &str, query: &str, variables: Value) -> Result<Value> {
         let response = self
             .client
             .post(endpoint)
@@ -89,6 +217,37 @@ impl TheGraphTool {
         result
             .data
             .ok_or_else(|| BamlRtError::ToolExecution("No data in GraphQL response".to_string()))
+    }
+
+    /// Convert gateway error to BAML error
+    fn gateway_error_to_baml_error(e: GatewayError) -> BamlRtError {
+        match e {
+            GatewayError::HttpError(msg) => {
+                BamlRtError::ToolExecution(format!("Gateway HTTP error: {}", msg))
+            }
+            GatewayError::GraphQLError(errors) => {
+                BamlRtError::ToolExecution(format!("GraphQL errors: {}", errors.join(", ")))
+            }
+            GatewayError::NoData => {
+                BamlRtError::ToolExecution("No data in GraphQL response".to_string())
+            }
+            GatewayError::SubgraphNotFound(id) => {
+                BamlRtError::InvalidArgument(format!("Subgraph not found: {}", id))
+            }
+            GatewayError::AllIndexersFailed => {
+                BamlRtError::ToolExecution("All indexers failed to respond".to_string())
+            }
+        }
+    }
+
+    /// Check if gateway caching is enabled
+    pub fn has_gateway(&self) -> bool {
+        self.gateway.is_some()
+    }
+
+    /// Get the gateway name (for logging/debugging)
+    pub fn gateway_name(&self) -> Option<&'static str> {
+        self.gateway.as_ref().map(|g| g.name())
     }
 
     /// Query top pools from Uniswap V3
@@ -694,5 +853,52 @@ mod tests {
         assert!(schema["properties"]["protocol"].is_object());
         assert!(schema["properties"]["network"].is_object());
         assert!(schema["properties"]["query_type"].is_object());
+    }
+
+    #[test]
+    fn test_gateway_disabled_by_default() {
+        let tool = TheGraphTool::new();
+        assert!(!tool.has_gateway());
+        assert!(tool.gateway_name().is_none());
+    }
+
+    #[test]
+    fn test_gateway_enabled_with_api_key() {
+        let tool = TheGraphTool::with_gateway("test-api-key".to_string());
+        assert!(tool.has_gateway());
+        assert_eq!(tool.gateway_name(), Some("BasicGraphGateway"));
+    }
+
+    #[test]
+    fn test_extract_subgraph_id() {
+        // Valid endpoint
+        let endpoint =
+            "https://gateway.thegraph.com/api/abc123/subgraphs/id/5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV";
+        assert_eq!(
+            TheGraphTool::extract_subgraph_id(endpoint),
+            Some("5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV")
+        );
+
+        // Invalid - no subgraph ID
+        let invalid = "https://api.example.com/graphql";
+        assert!(TheGraphTool::extract_subgraph_id(invalid).is_none());
+
+        // Invalid - too short
+        let short = "https://gateway.thegraph.com/api/key/subgraphs/id/abc";
+        assert!(TheGraphTool::extract_subgraph_id(short).is_none());
+    }
+
+    #[test]
+    fn test_get_subgraph_id() {
+        assert_eq!(
+            TheGraphTool::get_subgraph_id(Network::Ethereum, Protocol::UniswapV3),
+            Some(SubgraphIds::UNISWAP_V3_ETHEREUM)
+        );
+        assert_eq!(
+            TheGraphTool::get_subgraph_id(Network::Arbitrum, Protocol::UniswapV3),
+            Some(SubgraphIds::UNISWAP_V3_ARBITRUM)
+        );
+        // AaveV3 not configured for Uniswap V3
+        assert!(TheGraphTool::get_subgraph_id(Network::Ethereum, Protocol::AaveV3).is_none());
     }
 }

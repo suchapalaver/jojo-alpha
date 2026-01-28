@@ -24,7 +24,7 @@ pub mod wallet;
 mod error;
 
 // Re-export commonly used types
-pub use config::{Config, RpcConfig, SpendLimitMode};
+pub use config::{Config, RpcConfig, SpendLimitMode, GRAPH_API_KEY_ENV};
 pub use error::{Error, Result};
 pub use paper_trading::{PaperModeConfig, PaperTradingState};
 pub use runner::AgentRunner;

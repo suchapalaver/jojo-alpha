@@ -3,7 +3,7 @@
 //! Loads and executes the trading agent in the QuickJS sandbox with
 //! full tool and interceptor support.
 
-use crate::config::Config;
+use crate::config::{Config, GRAPH_API_KEY_ENV};
 use crate::interceptors::{
     AuditLogInterceptor, CooldownInterceptor, SlippageGuardInterceptor, SpendLimitInterceptor,
 };
@@ -266,7 +266,19 @@ impl AgentRunner {
             let mut registry_guard = tool_registry.lock().await;
 
             // Register The Graph tool
-            let the_graph_tool = TheGraphTool::new();
+            // Use gateway-enabled version if GRAPH_API_KEY is set (enables caching)
+            let the_graph_tool = match std::env::var(GRAPH_API_KEY_ENV) {
+                Ok(api_key) => {
+                    info!("Creating TheGraphTool with gateway caching enabled");
+                    TheGraphTool::with_gateway(api_key)
+                }
+                Err(_) => {
+                    warn!(
+                        "GRAPH_API_KEY not set, TheGraphTool will use direct queries (no caching)"
+                    );
+                    TheGraphTool::new()
+                }
+            };
             registry_guard.register(the_graph_tool).map_err(|e| {
                 crate::Error::BamlRuntime(format!("Failed to register TheGraphTool: {}", e))
             })?;
