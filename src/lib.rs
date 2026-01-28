@@ -15,6 +15,7 @@
 pub mod config;
 pub mod graphql;
 pub mod interceptors;
+pub mod paper_trading;
 pub mod runner;
 pub mod tokens;
 pub mod tools;
@@ -25,4 +26,5 @@ mod error;
 // Re-export commonly used types
 pub use config::{Config, RpcConfig, SpendLimitMode};
 pub use error::{Error, Result};
+pub use paper_trading::{PaperModeConfig, PaperTradingState};
 pub use runner::AgentRunner;

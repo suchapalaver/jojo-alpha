@@ -34,6 +34,18 @@ enum Commands {
         /// Dry run - don't execute trades, just log what would happen
         #[arg(long)]
         dry_run: bool,
+
+        /// Paper trading mode - simulate trades without real execution
+        #[arg(long)]
+        paper_trading: bool,
+
+        /// Initial balance for paper trading (USD, default: 10000)
+        #[arg(long, default_value = "10000")]
+        initial_balance: f64,
+
+        /// File to persist paper trading state
+        #[arg(long)]
+        paper_state_file: Option<PathBuf>,
     },
 
     /// Query The Graph subgraphs
@@ -142,8 +154,22 @@ async fn main() -> Result<()> {
     };
 
     match cli.command {
-        Commands::Run { agent, dry_run } => {
-            run_agent(agent, config, dry_run).await?;
+        Commands::Run {
+            agent,
+            dry_run,
+            paper_trading,
+            initial_balance,
+            paper_state_file,
+        } => {
+            run_agent(
+                agent,
+                config,
+                dry_run,
+                paper_trading,
+                initial_balance,
+                paper_state_file,
+            )
+            .await?;
         }
         Commands::Query {
             protocol,
@@ -181,19 +207,56 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run_agent(agent_path: PathBuf, config: Config, dry_run: bool) -> Result<()> {
+async fn run_agent(
+    agent_path: PathBuf,
+    config: Config,
+    dry_run: bool,
+    paper_trading: bool,
+    initial_balance: f64,
+    paper_state_file: Option<PathBuf>,
+) -> Result<()> {
     use defi_trading_agent::wallet::SecureWallet;
-    use defi_trading_agent::AgentRunner;
+    use defi_trading_agent::{AgentRunner, PaperModeConfig, PaperTradingState};
 
     tracing::info!(
         networks = ?config.networks,
         protocols = ?config.protocols,
         dry_run = dry_run,
+        paper_trading = paper_trading,
+        initial_balance = initial_balance,
         "Starting trading agent"
     );
 
     // Create the agent runner
     let mut runner = AgentRunner::new(config, dry_run);
+
+    // Set up paper trading if enabled
+    if paper_trading {
+        let paper_config = PaperModeConfig {
+            enabled: true,
+            initial_balance_usd: initial_balance,
+            state_file: paper_state_file.map(|p| p.to_string_lossy().to_string()),
+        };
+
+        let paper_state = PaperTradingState::load_or_create(&paper_config)
+            .await
+            .map_err(|e| {
+                defi_trading_agent::Error::Config(format!(
+                    "Failed to load paper trading state: {}",
+                    e
+                ))
+            })?;
+
+        let portfolio = paper_state.get_portfolio().await;
+        tracing::info!(
+            initial_usd = portfolio.initial_usd,
+            total_trades = portfolio.metrics.total_trades,
+            total_pnl_usd = portfolio.metrics.total_pnl_usd,
+            "Paper trading mode enabled"
+        );
+
+        runner = runner.with_paper_trading(paper_state);
+    }
 
     // Try to load wallet from environment if available
     if let Ok(private_key) = std::env::var("PRIVATE_KEY") {
@@ -206,7 +269,7 @@ async fn run_agent(agent_path: PathBuf, config: Config, dry_run: bool) -> Result
                 tracing::warn!(error = %e, "Failed to load wallet from PRIVATE_KEY");
             }
         }
-    } else if !dry_run {
+    } else if !dry_run && !paper_trading {
         tracing::warn!("No PRIVATE_KEY set - running in read-only mode (quotes only)");
     }
 

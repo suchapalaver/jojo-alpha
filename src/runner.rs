@@ -7,7 +7,8 @@ use crate::config::Config;
 use crate::interceptors::{
     AuditLogInterceptor, CooldownInterceptor, SlippageGuardInterceptor, SpendLimitInterceptor,
 };
-use crate::tools::{OdosTool, TheGraphTool, WalletTool};
+use crate::paper_trading::PaperTradingState;
+use crate::tools::{OdosTool, PaperTradingTool, TheGraphTool, WalletTool};
 use crate::wallet::SecureWallet;
 use crate::Result;
 use baml_rt::quickjs_bridge::QuickJSBridge;
@@ -23,6 +24,7 @@ pub struct AgentRunner {
     config: Config,
     dry_run: bool,
     wallet: Option<SecureWallet>,
+    paper_trading: Option<PaperTradingState>,
 }
 
 impl AgentRunner {
@@ -32,6 +34,7 @@ impl AgentRunner {
             config,
             dry_run,
             wallet: None,
+            paper_trading: None,
         }
     }
 
@@ -39,6 +42,20 @@ impl AgentRunner {
     pub fn with_wallet(mut self, wallet: SecureWallet) -> Self {
         self.wallet = Some(wallet);
         self
+    }
+
+    /// Enable paper trading mode
+    pub fn with_paper_trading(mut self, state: PaperTradingState) -> Self {
+        self.paper_trading = Some(state);
+        self
+    }
+
+    /// Check if paper trading is enabled
+    pub fn is_paper_trading(&self) -> bool {
+        self.paper_trading
+            .as_ref()
+            .map(|s| s.is_enabled())
+            .unwrap_or(false)
     }
 
     /// Load and run the agent from a directory
@@ -272,6 +289,20 @@ impl AgentRunner {
                 crate::Error::BamlRuntime(format!("Failed to register WalletTool: {}", e))
             })?;
             info!("Registered WalletTool with BAML manager");
+
+            // Register Paper Trading tool if enabled
+            if let Some(ref paper_state) = self.paper_trading {
+                if paper_state.is_enabled() {
+                    let paper_tool = PaperTradingTool::new(paper_state.clone());
+                    registry_guard.register(paper_tool).map_err(|e| {
+                        crate::Error::BamlRuntime(format!(
+                            "Failed to register PaperTradingTool: {}",
+                            e
+                        ))
+                    })?;
+                    info!("Registered PaperTradingTool with BAML manager");
+                }
+            }
         }
 
         // Note: JavaScript wrapper functions are NOT needed here because:
@@ -324,7 +355,7 @@ impl AgentRunner {
     /// Start the trading loop
     async fn start_trading_loop(&self, bridge: &Arc<Mutex<QuickJSBridge>>) -> Result<()> {
         // Build trading config for JavaScript
-        let trading_config = json!({
+        let mut trading_config = json!({
             "networks": self.config.networks.iter().map(|n| n.name()).collect::<Vec<_>>(),
             "protocols": self.config.protocols.iter().map(|p| p.name()).collect::<Vec<_>>(),
             "check_interval_ms": self.config.check_interval_ms,
@@ -334,6 +365,16 @@ impl AgentRunner {
                 "preferred_networks": self.config.networks.iter().map(|n| n.name()).collect::<Vec<_>>()
             }
         });
+
+        // Add paper trading config if enabled
+        if let Some(ref paper_state) = self.paper_trading {
+            if paper_state.is_enabled() {
+                trading_config["paper_trading"] = json!({
+                    "enabled": true
+                });
+                info!("Paper trading mode enabled in trading config");
+            }
+        }
 
         if self.dry_run {
             info!("Dry run mode - showing config that would be used:");
