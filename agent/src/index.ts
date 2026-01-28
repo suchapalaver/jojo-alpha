@@ -69,9 +69,45 @@ interface TradeAnalysis {
   concerns: string[];
 }
 
+// ============================================================
+// Query Planning Types (Graph-Inference Bidirectional Flow)
+// ============================================================
+
+interface QueryFilters {
+  min_tvl_usd?: number;
+  min_volume_tvl_ratio?: number;
+  token_pairs?: string[];
+  exclude_tokens?: string[];
+  min_volume_24h_usd?: number;
+  fee_tiers?: number[];
+}
+
+interface QueryPlan {
+  target_networks: string[];
+  target_protocols: string[];
+  data_filters: QueryFilters;
+  query_priority: number;
+  reasoning: string;
+  expected_data_points: number;
+}
+
+interface TradingContext {
+  cycleCount: number;
+  positions: Position[];
+  recentPools: PoolData[];
+  queryHistory: string[];
+  marketConditions: MarketConditions;
+  lastQueryPlan?: QueryPlan;
+  partialData: {
+    pools: PoolData[];
+    timestamp: number;
+  };
+}
+
 // Agent state
 let isRunning = false;
 let cycleCount = 0;
+let tradingContext: TradingContext | null = null;
 
 // Well-known token addresses
 const TOKENS = {
@@ -87,12 +123,111 @@ const TOKENS = {
   },
 };
 
+// ============================================================
+// Context Management Functions (Graph-Inference Bidirectional Flow)
+// ============================================================
+
 /**
- * Main trading loop
+ * Initialize trading context for a new session
+ */
+function initializeContext(config: TradingConfig): TradingContext {
+  return {
+    cycleCount: 0,
+    positions: [],
+    recentPools: [],
+    queryHistory: [],
+    marketConditions: {
+      eth_price_usd: 3500,
+      gas_price_gwei: 30,
+      market_sentiment: "neutral",
+    },
+    partialData: {
+      pools: [],
+      timestamp: Date.now(),
+    },
+  };
+}
+
+/**
+ * Update trading context with new data
+ */
+function updateContext(
+  context: TradingContext,
+  updates: {
+    positions?: Position[];
+    pools?: PoolData[];
+    market?: MarketConditions;
+    queryPlan?: QueryPlan;
+    queryMade?: string;
+  }
+): TradingContext {
+  return {
+    ...context,
+    cycleCount: context.cycleCount + 1,
+    positions: updates.positions !== undefined ? updates.positions : context.positions,
+    recentPools: updates.pools !== undefined ? updates.pools : context.recentPools,
+    marketConditions: updates.market !== undefined ? updates.market : context.marketConditions,
+    lastQueryPlan: updates.queryPlan !== undefined ? updates.queryPlan : context.lastQueryPlan,
+    queryHistory: updates.queryMade
+      ? [...context.queryHistory.slice(-9), updates.queryMade] // Keep last 10
+      : context.queryHistory,
+    partialData: updates.pools !== undefined
+      ? {
+          pools: updates.pools,
+          timestamp: Date.now(),
+        }
+      : context.partialData,
+  };
+}
+
+/**
+ * Execute a query plan from the inference strategist
+ */
+async function executeQueryPlan(plan: QueryPlan): Promise<PoolData[]> {
+  const pools: PoolData[] = [];
+
+  try {
+    const result = await invokeTool("query_subgraph", {
+      protocol: plan.target_protocols[0] || "uniswap_v3",
+      network: plan.target_networks[0] || "ethereum",
+      query_type: "query_plan",
+      params: {
+        query_plan: plan,
+      },
+    });
+
+    // Extract pools from query plan results
+    if (result.results && Array.isArray(result.results)) {
+      for (const networkResult of result.results) {
+        if (networkResult.data && networkResult.data.pools) {
+          for (const pool of networkResult.data.pools) {
+            pools.push({
+              pool_id: pool.id,
+              token0_symbol: (pool.token0 && pool.token0.symbol) || "???",
+              token1_symbol: (pool.token1 && pool.token1.symbol) || "???",
+              tvl_usd: parseFloat(pool.totalValueLockedUSD || "0"),
+              volume_24h_usd: parseFloat(pool.volumeUSD || "0"),
+              fee_tier: parseInt(pool.feeTier || "0"),
+              token0_price: parseFloat(pool.token0Price || "0"),
+              token1_price: parseFloat(pool.token1Price || "0"),
+            });
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Failed to execute query plan:", error);
+  }
+
+  return pools;
+}
+
+/**
+ * Main trading loop (linear flow - legacy)
  */
 async function runTradingLoop(config: TradingConfig): Promise<void> {
   isRunning = true;
-  console.log("Starting DeFi trading agent...");
+  console.log("Starting DeFi trading agent (linear mode)...");
   console.log(`Networks: ${config.networks.join(", ")}`);
   console.log(`Protocols: ${config.protocols.join(", ")}`);
   console.log(`Check interval: ${config.check_interval_ms}ms`);
@@ -122,6 +257,119 @@ async function runTradingLoop(config: TradingConfig): Promise<void> {
 
       // Step 5: Execute the recommended action
       await executeAction(action, config);
+
+      // Wait before next iteration
+      console.log(`Waiting ${config.check_interval_ms}ms before next cycle...`);
+      await sleep(config.check_interval_ms);
+    } catch (error) {
+      console.error("Trading loop error:", error);
+      // Wait before retry
+      await sleep(5000);
+    }
+  }
+
+  console.log("Trading agent stopped.");
+}
+
+/**
+ * Bidirectional trading loop with Graph-Inference interaction
+ *
+ * Flow:
+ * 1. Inference Strategist plans queries (InferQueryPlan)
+ * 2. Graph Orchestrator executes query plan
+ * 3. Inference Strategist analyzes partial data (InferFromPartialData)
+ * 4. Loop back to step 1 if more data needed, or execute action
+ */
+async function runBidirectionalTradingLoop(config: TradingConfig): Promise<void> {
+  isRunning = true;
+  console.log("Starting DeFi trading agent (Bidirectional Graph-Inference mode)...");
+  console.log(`Networks: ${config.networks.join(", ")}`);
+  console.log(`Protocols: ${config.protocols.join(", ")}`);
+  console.log(`Check interval: ${config.check_interval_ms}ms`);
+
+  // Initialize context
+  let context = initializeContext(config);
+  tradingContext = context;
+
+  while (isRunning) {
+    context = updateContext(context, {});
+    console.log(`\n=== Trading Cycle ${context.cycleCount} (Bidirectional) ===`);
+
+    try {
+      // Step 1: Get current market conditions (lightweight)
+      console.log("Fetching market conditions...");
+      const market = await getMarketConditions();
+      context = updateContext(context, { market });
+      console.log(`ETH: $${market.eth_price_usd}, Sentiment: ${market.market_sentiment}`);
+
+      // Step 2: Get current positions
+      const positions = await getCurrentPositions();
+      context = updateContext(context, { positions });
+      console.log(`Positions: ${positions.length} tokens`);
+
+      // Step 3: Expert 2 (Inference Strategist) plans queries
+      console.log("Inference Strategist: Planning queries...");
+      const queryPlan = await InferQueryPlan({
+        input: {
+          current_positions: context.positions,
+          recent_pools: context.recentPools,
+          market_conditions: context.marketConditions,
+          risk_params: config.risk,
+          query_history: context.queryHistory,
+          cycle_count: context.cycleCount,
+        },
+      });
+
+      console.log(`Query Plan: ${queryPlan.reasoning}`);
+      console.log(`  Networks: ${queryPlan.target_networks.join(", ")}`);
+      console.log(`  Protocols: ${queryPlan.target_protocols.join(", ")}`);
+      console.log(`  Priority: ${queryPlan.query_priority}`);
+      console.log(`  Expected pools: ${queryPlan.expected_data_points}`);
+
+      context = updateContext(context, { queryPlan });
+
+      // Step 4: Expert 1 (Graph Orchestrator) executes query plan
+      console.log("Graph Orchestrator: Executing query plan...");
+      const pools = await executeQueryPlan(queryPlan);
+      console.log(`Retrieved ${pools.length} pools`);
+
+      const queryKey = `${queryPlan.target_networks.join(",")}:${queryPlan.target_protocols.join(",")}`;
+      context = updateContext(context, {
+        pools,
+        queryMade: queryKey,
+      });
+
+      // Step 5: Expert 2 analyzes partial data and decides next action
+      console.log("Inference Strategist: Analyzing data...");
+      const action = await InferFromPartialData({
+        input: {
+          pools: context.partialData.pools,
+          market: context.marketConditions,
+          positions: context.positions,
+          risk_params: config.risk,
+          query_plan: queryPlan,
+          has_more_data: pools.length < queryPlan.expected_data_points,
+        },
+      });
+
+      console.log(`Strategy decision: ${action.action}`);
+
+      // Step 6: Handle the action
+      if (action.action === "query_pools") {
+        console.log(`Need more data: ${action.reason}`);
+        console.log(`Will query ${action.protocol} on ${action.network} next cycle`);
+        // Continue to next cycle (will plan new queries)
+      } else {
+        // Step 7: Execute the recommended action (swap or wait)
+        await executeAction(action, config);
+      }
+
+      // Update context with recent pools for next cycle (keep top 20)
+      const topPools = context.partialData.pools.slice(0, 20);
+      context = updateContext(context, { pools: topPools });
+
+      // Update global context reference
+      tradingContext = context;
 
       // Wait before next iteration
       console.log(`Waiting ${config.check_interval_ms}ms before next cycle...`);
@@ -514,12 +762,16 @@ declare global {
   function invokeTool(name: string, args: any): Promise<any>;
   function InferStrategy(args: any): Promise<any>;
   function AnalyzeTrade(args: any): Promise<any>;
+  function InferQueryPlan(args: any): Promise<QueryPlan>;
+  function InferFromPartialData(args: any): Promise<TradingAction>;
 }
 
 // Register functions globally
 (globalThis as any).runTradingLoop = runTradingLoop;
+(globalThis as any).runBidirectionalTradingLoop = runBidirectionalTradingLoop;
 (globalThis as any).stopTrading = stopTrading;
 (globalThis as any).TOKENS = TOKENS;
 
 console.log("DeFi trading agent module loaded");
-console.log("Call runTradingLoop(config) to start");
+console.log("Call runTradingLoop(config) for linear mode");
+console.log("Call runBidirectionalTradingLoop(config) for Graph-Inference bidirectional mode");

@@ -1,6 +1,7 @@
 //! The Graph subgraph query tool
 //!
 //! Queries DeFi protocol data from The Graph's subgraphs.
+//! Supports query planning for bidirectional Graph-Inference flow.
 
 use crate::config::{Network, Protocol, SubgraphEndpoints};
 use async_trait::async_trait;
@@ -9,6 +10,34 @@ use baml_rt::tools::BamlTool;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashSet;
+
+/// Query filters for intelligent data fetching (from InferQueryPlan)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct QueryFilters {
+    #[serde(default)]
+    pub min_tvl_usd: Option<f64>,
+    #[serde(default)]
+    pub min_volume_tvl_ratio: Option<f64>,
+    #[serde(default)]
+    pub token_pairs: Option<Vec<String>>,
+    #[serde(default)]
+    pub exclude_tokens: Option<Vec<String>>,
+    #[serde(default)]
+    pub min_volume_24h_usd: Option<f64>,
+    #[serde(default)]
+    pub fee_tiers: Option<Vec<u32>>,
+}
+
+/// Query plan from inference strategist (InferQueryPlan)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryPlan {
+    pub target_networks: Vec<String>,
+    pub target_protocols: Vec<String>,
+    pub data_filters: QueryFilters,
+    pub query_priority: u32,
+    pub expected_data_points: u32,
+}
 
 /// Tool for querying The Graph subgraphs
 pub struct TheGraphTool {
@@ -233,6 +262,236 @@ impl TheGraphTool {
         }))
     }
 
+    /// Query pools with filters applied (for bidirectional Graph-Inference flow)
+    async fn query_filtered_pools(
+        &self,
+        network: Network,
+        filters: &QueryFilters,
+        limit: u32,
+    ) -> Result<Value> {
+        let endpoint = self
+            .endpoints
+            .endpoints
+            .get(&(network, Protocol::UniswapV3))
+            .ok_or_else(|| {
+                BamlRtError::InvalidArgument(format!(
+                    "No Uniswap V3 endpoint configured for {:?}",
+                    network
+                ))
+            })?;
+
+        // Build GraphQL where clause from filters
+        let mut where_clauses = Vec::new();
+
+        if let Some(min_tvl) = filters.min_tvl_usd {
+            where_clauses.push(format!("totalValueLockedUSD_gte: \"{}\"", min_tvl));
+        }
+
+        if let Some(min_vol) = filters.min_volume_24h_usd {
+            where_clauses.push(format!("volumeUSD_gte: \"{}\"", min_vol));
+        }
+
+        if let Some(ref fee_tiers) = filters.fee_tiers {
+            let fee_list = fee_tiers
+                .iter()
+                .map(|f| f.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            where_clauses.push(format!("feeTier_in: [{}]", fee_list));
+        }
+
+        let where_clause = if where_clauses.is_empty() {
+            String::new()
+        } else {
+            format!("where: {{ {} }}", where_clauses.join(", "))
+        };
+
+        let query = format!(
+            r#"
+            query FilteredPools($first: Int!) {{
+                pools(
+                    first: $first
+                    orderBy: totalValueLockedUSD
+                    orderDirection: desc
+                    {}
+                ) {{
+                    id
+                    token0 {{
+                        id
+                        symbol
+                        name
+                        decimals
+                    }}
+                    token1 {{
+                        id
+                        symbol
+                        name
+                        decimals
+                    }}
+                    feeTier
+                    liquidity
+                    sqrtPrice
+                    token0Price
+                    token1Price
+                    volumeUSD
+                    totalValueLockedUSD
+                    txCount
+                }}
+            }}
+            "#,
+            where_clause
+        );
+
+        let variables = json!({ "first": limit });
+        let data = self.query_subgraph(endpoint, &query, variables).await?;
+
+        // Get pools array for post-query filtering
+        let mut pools: Vec<Value> = data
+            .get("pools")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        // Apply post-query filters (volume/TVL ratio, token pairs, exclude tokens)
+
+        // Filter by volume/TVL ratio
+        if let Some(min_ratio) = filters.min_volume_tvl_ratio {
+            pools.retain(|pool| {
+                let tvl = pool
+                    .get("totalValueLockedUSD")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+                let volume = pool
+                    .get("volumeUSD")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+
+                if tvl > 0.0 {
+                    (volume / tvl) >= min_ratio
+                } else {
+                    false
+                }
+            });
+        }
+
+        // Filter by token pairs (if specified)
+        if let Some(ref pairs) = filters.token_pairs {
+            let pair_set: HashSet<String> = pairs
+                .iter()
+                .map(|p| p.to_lowercase().replace('/', "-"))
+                .collect();
+
+            pools.retain(|pool| {
+                let token0 = pool
+                    .get("token0")
+                    .and_then(|t| t.get("symbol"))
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("");
+                let token1 = pool
+                    .get("token1")
+                    .and_then(|t| t.get("symbol"))
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("");
+
+                let pair1 = format!("{}-{}", token0, token1).to_lowercase();
+                let pair2 = format!("{}-{}", token1, token0).to_lowercase();
+
+                pair_set.contains(&pair1) || pair_set.contains(&pair2)
+            });
+        }
+
+        // Exclude tokens
+        if let Some(ref exclude) = filters.exclude_tokens {
+            let exclude_set: HashSet<String> = exclude.iter().map(|t| t.to_lowercase()).collect();
+
+            pools.retain(|pool| {
+                let token0_id = pool
+                    .get("token0")
+                    .and_then(|t| t.get("id"))
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+                let token1_id = pool
+                    .get("token1")
+                    .and_then(|t| t.get("id"))
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+
+                !exclude_set.contains(&token0_id) && !exclude_set.contains(&token1_id)
+            });
+        }
+
+        let count = pools.len();
+        Ok(json!({
+            "protocol": "uniswap_v3",
+            "network": network.name(),
+            "pools": pools,
+            "filters_applied": true,
+            "count": count
+        }))
+    }
+
+    /// Execute a full query plan across multiple networks/protocols
+    async fn execute_query_plan(&self, plan: &QueryPlan) -> Result<Value> {
+        let mut results: Vec<Value> = Vec::new();
+
+        // Execute queries for each network/protocol combination
+        for network_str in &plan.target_networks {
+            let network = match Self::parse_network(network_str) {
+                Ok(n) => n,
+                Err(e) => {
+                    tracing::warn!(
+                        network = network_str,
+                        error = %e,
+                        "Skipping unknown network in query plan"
+                    );
+                    continue;
+                }
+            };
+
+            for protocol_str in &plan.target_protocols {
+                if protocol_str == "uniswap_v3" {
+                    // Use filtered_pools with plan's filters
+                    let limit = plan.expected_data_points.clamp(10, 100);
+                    match self
+                        .query_filtered_pools(network, &plan.data_filters, limit)
+                        .await
+                    {
+                        Ok(result) => {
+                            results.push(json!({
+                                "network": network_str,
+                                "protocol": protocol_str,
+                                "data": result
+                            }));
+                        }
+                        Err(e) => {
+                            // Log error but continue with other queries
+                            tracing::warn!(
+                                network = network_str,
+                                protocol = protocol_str,
+                                error = %e,
+                                "Query failed in query plan execution"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(json!({
+            "query_plan": {
+                "target_networks": plan.target_networks,
+                "target_protocols": plan.target_protocols,
+                "priority": plan.query_priority,
+                "expected_data_points": plan.expected_data_points
+            },
+            "results": results
+        }))
+    }
+
     fn parse_network(s: &str) -> Result<Network> {
         match s.to_lowercase().as_str() {
             "ethereum" | "mainnet" => Ok(Network::Ethereum),
@@ -278,8 +537,8 @@ impl BamlTool for TheGraphTool {
                 },
                 "query_type": {
                     "type": "string",
-                    "enum": ["top_pools", "pool_info", "token_price"],
-                    "description": "Type of data to retrieve"
+                    "enum": ["top_pools", "pool_info", "token_price", "filtered_pools", "query_plan"],
+                    "description": "Type of data to retrieve. 'filtered_pools' applies filters to pool queries. 'query_plan' executes a full QueryPlan from InferQueryPlan."
                 },
                 "params": {
                     "type": "object",
@@ -287,7 +546,7 @@ impl BamlTool for TheGraphTool {
                     "properties": {
                         "limit": {
                             "type": "integer",
-                            "description": "Number of results for top_pools (default: 10)"
+                            "description": "Number of results for top_pools/filtered_pools (default: 10)"
                         },
                         "pool_id": {
                             "type": "string",
@@ -296,6 +555,29 @@ impl BamlTool for TheGraphTool {
                         "token_address": {
                             "type": "string",
                             "description": "Token address for token_price query"
+                        },
+                        "filters": {
+                            "type": "object",
+                            "description": "Filters for filtered_pools query",
+                            "properties": {
+                                "min_tvl_usd": {"type": "number", "description": "Minimum TVL in USD"},
+                                "min_volume_tvl_ratio": {"type": "number", "description": "Minimum volume/TVL ratio"},
+                                "token_pairs": {"type": "array", "items": {"type": "string"}, "description": "Token pairs to include (e.g., ['WETH/USDC'])"},
+                                "exclude_tokens": {"type": "array", "items": {"type": "string"}, "description": "Token addresses to exclude"},
+                                "min_volume_24h_usd": {"type": "number", "description": "Minimum 24h volume in USD"},
+                                "fee_tiers": {"type": "array", "items": {"type": "integer"}, "description": "Fee tiers to include (e.g., [3000, 5000])"}
+                            }
+                        },
+                        "query_plan": {
+                            "type": "object",
+                            "description": "Full QueryPlan from InferQueryPlan (for query_plan query_type)",
+                            "properties": {
+                                "target_networks": {"type": "array", "items": {"type": "string"}},
+                                "target_protocols": {"type": "array", "items": {"type": "string"}},
+                                "data_filters": {"type": "object"},
+                                "query_priority": {"type": "integer"},
+                                "expected_data_points": {"type": "integer"}
+                            }
                         }
                     }
                 }
@@ -349,6 +631,22 @@ impl BamlTool for TheGraphTool {
                         )
                     })?;
                 self.query_token_price(network, token_address).await
+            }
+            ("uniswap_v3", "filtered_pools") => {
+                let filters_json = params.get("filters").cloned().unwrap_or(json!({}));
+                let filters: QueryFilters = serde_json::from_value(filters_json)
+                    .map_err(|e| BamlRtError::InvalidArgument(format!("Invalid filters: {}", e)))?;
+                let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
+                self.query_filtered_pools(network, &filters, limit).await
+            }
+            ("uniswap_v3", "query_plan") => {
+                let plan_json = params.get("query_plan").ok_or_else(|| {
+                    BamlRtError::InvalidArgument("Missing 'query_plan' in params".to_string())
+                })?;
+                let plan: QueryPlan = serde_json::from_value(plan_json.clone()).map_err(|e| {
+                    BamlRtError::InvalidArgument(format!("Invalid query plan: {}", e))
+                })?;
+                self.execute_query_plan(&plan).await
             }
             _ => Err(BamlRtError::InvalidArgument(format!(
                 "Unsupported query: {}/{}",
