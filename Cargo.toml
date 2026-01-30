@@ -11,7 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 # BAML Runtime (QuickJS sandbox for TypeScript agent execution)
-baml-rt = { git = "https://github.com/suchapalaver/baml-ts-sandbox.git" }
+# NOTE: baml-rt depends on local path crates in ../baml, so use a local path here.
+baml-rt = { path = "../baml-ts-sandbox" }
 
 # DEX Aggregator
 odos-sdk = "2.0"
@@ -31,6 +32,8 @@ futures = "0.3"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# Force js-sys version to align with baml-runtime constraints.
+js-sys = "=0.3.78"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
