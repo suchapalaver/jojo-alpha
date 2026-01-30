@@ -41,6 +41,10 @@ TypeScript Agent (QuickJS sandbox)
     SecureWallet (transaction signing)
 ```
 
+## Dependencies
+
+This project depends on [baml-ts-sandbox](https://github.com/suchapalaver/baml-ts-sandbox), a QuickJS-based runtime for executing TypeScript agents in a secure sandbox. It's pulled automatically via Cargo from the git repository.
+
 ## Quick Start
 
 ```bash

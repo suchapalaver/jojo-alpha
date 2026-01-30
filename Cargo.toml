@@ -10,8 +10,8 @@ name = "defi-agent"
 path = "src/main.rs"
 
 [dependencies]
-# BAML Runtime
-baml-rt = { path = "../baml-ts-sandbox" }
+# BAML Runtime (QuickJS sandbox for TypeScript agent execution)
+baml-rt = { git = "https://github.com/suchapalaver/baml-ts-sandbox.git" }
 
 # DEX Aggregator
 odos-sdk = "2.0"

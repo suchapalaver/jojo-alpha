@@ -92,7 +92,7 @@ cargo run -- -v <command>
 
 ## Dependencies
 
-- **baml-rt** (local path: `../baml-ts-sandbox`): BAML runtime for LLM function execution
+- **baml-rt** (git: `suchapalaver/baml-ts-sandbox`): QuickJS-based runtime for TypeScript agent execution
 - **odos-sdk**: Odos DEX aggregator SDK
 - **graphql_client**: Compile-time typed GraphQL queries
 - **alloy**: Ethereum primitives and signing
