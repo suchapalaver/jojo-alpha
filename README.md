@@ -65,6 +65,17 @@ cargo run -- quote --input <token> --output <token> --amount <wei>
 | `OPENROUTER_API_KEY` | For trading | LLM inference via OpenRouter |
 | `PRIVATE_KEY` | Optional | Wallet key (hex, with or without 0x) |
 
+### A note on private key management
+
+The `PRIVATE_KEY` environment variable is convenient for development and paper trading, but **not recommended for production** with significant funds. Better options:
+
+- **Hardware wallets** (Ledger, Trezor) via WalletConnect or similar
+- **Cloud KMS** (AWS KMS, GCP Cloud HSM, Azure Key Vault) for server-side signing
+- **Dedicated signing services** (Fireblocks, Fordefi) for institutional setups
+- **Multisig** (Safe) for additional authorization controls
+
+The current implementation isolates the key within `SecureWallet` and never logs or serializes it, but defense-in-depth means the key ideally shouldn't be on the same machine running the agent.
+
 ## Safety Model
 
 Private keys never leave the `SecureWallet` module. All trades pass through an interceptor pipeline:
