@@ -818,7 +818,7 @@ dependencies = [
  "http 1.4.0",
  "serde_json",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.26.2",
  "tracing",
  "ws_stream_wasm",
 ]
@@ -1908,11 +1908,12 @@ dependencies = [
 
 [[package]]
 name = "baml-compiler"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "baml-types",
+ "baml-viz-events",
  "baml-vm",
  "internal-baml-ast",
  "internal-baml-diagnostics",
@@ -1926,8 +1927,8 @@ dependencies = [
 
 [[package]]
 name = "baml-derive"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1937,7 +1938,7 @@ dependencies = [
 [[package]]
 name = "baml-ids"
 version = "0.0.1"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "getrandom 0.2.17",
@@ -1950,8 +1951,8 @@ dependencies = [
 
 [[package]]
 name = "baml-log"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1966,7 +1967,7 @@ dependencies = [
 [[package]]
 name = "baml-rpc"
 version = "0.0.1"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "baml-ids",
@@ -2007,30 +2008,160 @@ name = "baml-rt"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-trait",
- "baml-runtime",
- "baml-types",
+ "baml-rt-a2a",
+ "baml-rt-builder",
+ "baml-rt-core",
+ "baml-rt-interceptor",
+ "baml-rt-observability",
+ "baml-rt-quickjs",
+ "baml-rt-tools",
  "clap",
  "flate2",
- "internal-baml-core",
- "oxc_allocator",
- "oxc_parser",
- "oxc_span",
- "quickjs_runtime",
+ "futures-util",
  "regex",
  "serde",
  "serde_json",
  "tar",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-tungstenite 0.28.0",
  "tracing",
+]
+
+[[package]]
+name = "baml-rt-a2a"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "baml-rt-core",
+ "baml-rt-observability",
+ "baml-rt-provenance",
+ "baml-rt-quickjs",
+ "baml-rt-tools",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite 0.28.0",
+ "tracing",
+]
+
+[[package]]
+name = "baml-rt-builder"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "baml-rt-core",
+ "baml-rt-observability",
+ "baml-rt-quickjs",
+ "baml-runtime",
+ "clap",
+ "flate2",
+ "internal-baml-core",
+ "oxc_allocator",
+ "oxc_codegen",
+ "oxc_parser",
+ "oxc_semantic",
+ "oxc_span",
+ "oxc_transformer",
+ "regex",
+ "serde_json",
+ "tar",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "baml-rt-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "baml-runtime",
+ "baml-types",
+ "internal-baml-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "baml-rt-interceptor"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "baml-rt-core",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "baml-rt-observability"
+version = "0.1.0"
+dependencies = [
+ "baml-rt-core",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "tokio",
+ "tracing",
+ "tracing-opentelemetry",
  "tracing-subscriber",
 ]
 
 [[package]]
+name = "baml-rt-provenance"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "baml-rt-core",
+ "baml-rt-interceptor",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "baml-rt-quickjs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "baml-rt-core",
+ "baml-rt-interceptor",
+ "baml-rt-observability",
+ "baml-rt-tools",
+ "baml-runtime",
+ "baml-types",
+ "internal-baml-core",
+ "quickjs_runtime",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "baml-rt-tools"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "baml-rt-core",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "baml-runtime"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "async-std",
@@ -2051,6 +2182,7 @@ dependencies = [
  "baml-log",
  "baml-rpc",
  "baml-types",
+ "baml-viz-events",
  "baml-vm",
  "base64 0.22.1",
  "blake3",
@@ -2122,6 +2254,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "shell-escape",
+ "similar",
  "static_assertions",
  "stream-cancel",
  "strsim",
@@ -2153,8 +2286,8 @@ dependencies = [
 
 [[package]]
 name = "baml-types"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "baml-ids",
@@ -2179,12 +2312,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "baml-viz-events"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "baml-vm"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "baml-types",
+ "baml-viz-events",
  "colored",
  "indexmap 2.13.0",
  "internal-baml-diagnostics",
@@ -2452,8 +2594,8 @@ dependencies = [
 
 [[package]]
 name = "bstd"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2728,6 +2870,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75443c44cd6b379beb8c5b45d85d0773baf31cce901fe7bb252f4eff3008ef7d"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "cobs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
+dependencies = [
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3465,8 +3616,8 @@ dependencies = [
 
 [[package]]
 name = "dir-writer"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "baml-log",
@@ -3526,9 +3677,9 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "dragonbox_ecma"
-version = "0.0.5"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d742b56656e8b14d63e7ea9806597b1849ae25412584c8adf78c0f67bd985e66"
+checksum = "6a5577f010d4e1bb3f3c4d6081e05718eb6992cf20119cab4d3abadff198b5ae"
 
 [[package]]
 name = "dunce"
@@ -3597,6 +3748,18 @@ dependencies = [
  "subtle",
  "zeroize",
 ]
+
+[[package]]
+name = "embedded-io"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef1a6892d9eef45c8fa6b9e0086428a2cca8491aca8f787c534a3d6d0bcb3ced"
+
+[[package]]
+name = "embedded-io"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 
 [[package]]
 name = "encode_unicode"
@@ -4086,20 +4249,21 @@ dependencies = [
 
 [[package]]
 name = "generators-go"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "askama",
  "baml-types",
  "dir-writer",
  "internal-baml-core",
+ "type_test_spec",
 ]
 
 [[package]]
 name = "generators-lib"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "baml-log",
@@ -4108,6 +4272,7 @@ dependencies = [
  "generators-openapi",
  "generators-python",
  "generators-ruby",
+ "generators-rust",
  "generators-typescript",
  "indexmap 2.13.0",
  "internal-baml-core",
@@ -4117,8 +4282,8 @@ dependencies = [
 
 [[package]]
 name = "generators-openapi"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "askama",
@@ -4134,8 +4299,8 @@ dependencies = [
 
 [[package]]
 name = "generators-python"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "askama",
@@ -4143,12 +4308,13 @@ dependencies = [
  "baml-types",
  "dir-writer",
  "internal-baml-core",
+ "type_test_spec",
 ]
 
 [[package]]
 name = "generators-ruby"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "askama",
@@ -4158,9 +4324,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "generators-rust"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
+dependencies = [
+ "anyhow",
+ "askama",
+ "baml-types",
+ "dir-writer",
+ "internal-baml-core",
+ "type_test_spec",
+]
+
+[[package]]
 name = "generators-typescript"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "askama",
@@ -4170,6 +4349,7 @@ dependencies = [
  "indexmap 2.13.0",
  "internal-baml-core",
  "regex",
+ "type_test_spec",
 ]
 
 [[package]]
@@ -5031,8 +5211,8 @@ dependencies = [
 
 [[package]]
 name = "internal-baml-ast"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "baml-types",
@@ -5052,8 +5232,8 @@ dependencies = [
 
 [[package]]
 name = "internal-baml-core"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "baml-compiler",
@@ -5090,8 +5270,8 @@ dependencies = [
 
 [[package]]
 name = "internal-baml-diagnostics"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "colored",
@@ -5104,8 +5284,8 @@ dependencies = [
 
 [[package]]
 name = "internal-baml-jinja"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "askama",
@@ -5127,8 +5307,8 @@ dependencies = [
 
 [[package]]
 name = "internal-baml-jinja-types"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "askama",
@@ -5146,8 +5326,8 @@ dependencies = [
 
 [[package]]
 name = "internal-baml-parser-database"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "baml-derive",
@@ -5173,8 +5353,8 @@ dependencies = [
 
 [[package]]
 name = "internal-baml-prompt-parser"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "internal-baml-ast",
  "internal-baml-diagnostics",
@@ -5186,8 +5366,8 @@ dependencies = [
 
 [[package]]
 name = "internal-llm-client"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "aws-config",
@@ -5370,13 +5550,19 @@ dependencies = [
 
 [[package]]
 name = "js-sys"
-version = "0.3.78"
+version = "0.3.82"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c0b063578492ceec17683ef2f8c5e89121fbd0b172cbc280635ab7567db2738"
+checksum = "b011eec8cc36da2aab2d5cff675ec18454fad408585853910a202391cf9f8e65"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "json-escape-simd"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3c2a6c0b4b5637c41719973ef40c6a1cf564f9db6958350de6193fbee9c23f5"
 
 [[package]]
 name = "json_comments"
@@ -5395,8 +5581,8 @@ dependencies = [
 
 [[package]]
 name = "jsonish"
-version = "0.214.0"
-source = "git+https://github.com/BoundaryML/baml?rev=bb42e0f#bb42e0fb9a78ed43d3c15bedabb1188202ff4a8e"
+version = "0.218.1"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 dependencies = [
  "anyhow",
  "baml-types",
@@ -6156,6 +6342,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentelemetry"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "570074cc999d1a58184080966e5bd3bf3a9a4af650c3b05047c2621e7405cd17"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "js-sys",
+ "once_cell",
+ "pin-project-lite",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "opentelemetry_sdk"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2c627d9f4c9cdc1f21a29ee4bfbd6028fcb8bcf2a857b43f3abdf72c9c862f3"
+dependencies = [
+ "async-trait",
+ "futures-channel",
+ "futures-executor",
+ "futures-util",
+ "glob",
+ "once_cell",
+ "opentelemetry",
+ "percent-encoding",
+ "rand 0.8.5",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6198,6 +6417,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c6901729fa79e91a0913333229e9ca5dc725089d1c363b2f4b4760709dc4a52"
 
 [[package]]
+name = "oxc-browserslist"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75b1853bc34cadaa90aa09f95713d8b77ec0c0d3e2d90ccf7a74216f40d20850"
+dependencies = [
+ "flate2",
+ "postcard",
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "oxc-miette"
 version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6225,12 +6458,11 @@ dependencies = [
 
 [[package]]
 name = "oxc_allocator"
-version = "0.102.0"
+version = "0.112.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8fbc3ece85f3523598a8560369ccc30a970f338b6fd651f5151c8431ec2edb3"
+checksum = "e7b9c7293fac710d0be6e941b70749566dc69f1918cf0446a677d0eb9a7c8259"
 dependencies = [
  "allocator-api2",
- "bumpalo",
  "hashbrown 0.16.1",
  "oxc_data_structures",
  "rustc-hash 2.1.1",
@@ -6238,9 +6470,9 @@ dependencies = [
 
 [[package]]
 name = "oxc_ast"
-version = "0.102.0"
+version = "0.112.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11784bdab9500aafbad254c0e104b019e611b091c69992be9e27026c6a79134c"
+checksum = "4dd97b20b4ad9987795c0e5eda56752de8c24682a4e2cd6b1698fdc8135510e3"
 dependencies = [
  "bitflags 2.10.0",
  "oxc_allocator",
@@ -6255,9 +6487,9 @@ dependencies = [
 
 [[package]]
 name = "oxc_ast_macros"
-version = "0.102.0"
+version = "0.112.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac4d631c1c0c184f94fd83132e9e34ee8c67230dc40408d53fa0a2bfd479cefd"
+checksum = "58b1eb3b6f9ed42c528030161d0370b023229ed05b785baf7a80d7e99a794da2"
 dependencies = [
  "phf 0.13.1",
  "proc-macro2",
@@ -6266,16 +6498,65 @@ dependencies = [
 ]
 
 [[package]]
-name = "oxc_data_structures"
-version = "0.102.0"
+name = "oxc_ast_visit"
+version = "0.112.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6313706dfe9442ca66d116e33cb9dd10a2e849f50c02b2ceeeee0054314faa8"
+checksum = "936eaf04ad8fd9f1e7613e277a7a0a2f8575fa9543c7a0fac4a8a6f590c8527c"
+dependencies = [
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_span",
+ "oxc_syntax",
+]
+
+[[package]]
+name = "oxc_codegen"
+version = "0.112.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdb04590335665806a3bc39485bb2f3c31d198c1dfd6bf7aa8405cd93b8205a0"
+dependencies = [
+ "bitflags 2.10.0",
+ "cow-utils",
+ "dragonbox_ecma",
+ "itoa",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_data_structures",
+ "oxc_index",
+ "oxc_semantic",
+ "oxc_sourcemap",
+ "oxc_span",
+ "oxc_syntax",
+ "rustc-hash 2.1.1",
+]
+
+[[package]]
+name = "oxc_compat"
+version = "0.112.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7a1d5d8480010cab1dd1ede5287085472224f39aace766dcd2ae4c0005f3273"
+dependencies = [
+ "cow-utils",
+ "oxc-browserslist",
+ "oxc_syntax",
+ "rustc-hash 2.1.1",
+ "serde",
+]
+
+[[package]]
+name = "oxc_data_structures"
+version = "0.112.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cea257e0e5a91b5cfcf06fd91744514d24e53c5450620f54a9fa1053f2b3fdf2"
+dependencies = [
+ "ropey",
+]
 
 [[package]]
 name = "oxc_diagnostics"
-version = "0.102.0"
+version = "0.112.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d11c355f743e15dbe89d8904ed62de912a27c65190efa17cea589098aded5cf2"
+checksum = "ed1dce4194036de316f09d86c9a02e42aab1693c20423f20dda694c5d9f04394"
 dependencies = [
  "cow-utils",
  "oxc-miette",
@@ -6284,24 +6565,25 @@ dependencies = [
 
 [[package]]
 name = "oxc_ecmascript"
-version = "0.102.0"
+version = "0.112.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b93d021e8372fe98815f1dca0624a875286e5560b559ef113190ca1af499222e"
+checksum = "50f9465ce204eaddca376dcc235a44915c05ad512e280417d2cafd6bb1934f04"
 dependencies = [
  "cow-utils",
  "num-bigint",
  "num-traits",
  "oxc_allocator",
  "oxc_ast",
+ "oxc_regular_expression",
  "oxc_span",
  "oxc_syntax",
 ]
 
 [[package]]
 name = "oxc_estree"
-version = "0.102.0"
+version = "0.112.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a10a5fec27ce5fac791761d28f984f769386faaf35076876d77fed7dd662450a"
+checksum = "e1bc44f56db73d6b7a5b8c4b4979cde79809e7c18d7fe5d99dffc37128bedd8c"
 
 [[package]]
 name = "oxc_index"
@@ -6315,9 +6597,9 @@ dependencies = [
 
 [[package]]
 name = "oxc_parser"
-version = "0.102.0"
+version = "0.112.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1087bb997a4d5228e8777856352c2fa79a959437ca67b7ad6b3d5de35f63a8bb"
+checksum = "f38f73b67e2ae42ce4a14e4e1dc305d65e1ada635c52959dbfaad5eec7245a15"
 dependencies = [
  "bitflags 2.10.0",
  "cow-utils",
@@ -6338,9 +6620,9 @@ dependencies = [
 
 [[package]]
 name = "oxc_regular_expression"
-version = "0.102.0"
+version = "0.112.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0de14dca3a84bf8b7c1ab8fa16f9b1c24238e9b8db8b9236e472ae26951d4bb7"
+checksum = "9b53ad034b3b87531190c0adde3dca1ee8a3d09e9009960576077a4062d9bc10"
 dependencies = [
  "bitflags 2.10.0",
  "oxc_allocator",
@@ -6353,23 +6635,70 @@ dependencies = [
 ]
 
 [[package]]
-name = "oxc_span"
-version = "0.102.0"
+name = "oxc_semantic"
+version = "0.112.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33999cc6b1d19d61a057abd956563e9d2189fd33aafa05e3ff110bebf119e938"
+checksum = "0bc73688fe48cf7f8cd6202216864c5d569f3903758b9b0c1733dbd1eedc1fce"
+dependencies = [
+ "itertools 0.14.0",
+ "memchr",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_data_structures",
+ "oxc_diagnostics",
+ "oxc_ecmascript",
+ "oxc_index",
+ "oxc_span",
+ "oxc_syntax",
+ "rustc-hash 2.1.1",
+ "self_cell",
+ "smallvec",
+]
+
+[[package]]
+name = "oxc_sourcemap"
+version = "6.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36801dbbd025f2fa133367494e38eef75a53d334ae6746ba0c889fc4e76fa3a3"
+dependencies = [
+ "base64-simd",
+ "json-escape-simd",
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "oxc_span"
+version = "0.112.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4807a64b6063717dcd863fb4c1ce5ec628728d037e2f20e3ffdcf3aa4adf96ca"
 dependencies = [
  "compact_str 0.9.0",
  "oxc-miette",
  "oxc_allocator",
  "oxc_ast_macros",
  "oxc_estree",
+ "oxc_str",
+]
+
+[[package]]
+name = "oxc_str"
+version = "0.112.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c64a431903dbb9b8505324824d1bd50e52407ebc30bf9a42279cd477328223e"
+dependencies = [
+ "compact_str 0.9.0",
+ "oxc_allocator",
+ "oxc_estree",
 ]
 
 [[package]]
 name = "oxc_syntax"
-version = "0.102.0"
+version = "0.112.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d1fa373e38de4ac887cbe0ab62653402aff4388cdd642943432f2ed512f4c45"
+checksum = "82c8d491f4b2755a81aac85cde4706b591129215b3a79229ed0607ef622ed38b"
 dependencies = [
  "bitflags 2.10.0",
  "cow-utils",
@@ -6383,6 +6712,53 @@ dependencies = [
  "oxc_span",
  "phf 0.13.1",
  "unicode-id-start",
+]
+
+[[package]]
+name = "oxc_transformer"
+version = "0.112.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "768f8763f5901f4f517b96a25235a838805764cff3c5d2a67eed3c07493f8894"
+dependencies = [
+ "base64 0.22.1",
+ "compact_str 0.9.0",
+ "indexmap 2.13.0",
+ "itoa",
+ "memchr",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_compat",
+ "oxc_data_structures",
+ "oxc_diagnostics",
+ "oxc_ecmascript",
+ "oxc_regular_expression",
+ "oxc_semantic",
+ "oxc_span",
+ "oxc_syntax",
+ "oxc_traverse",
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde_json",
+ "sha1",
+]
+
+[[package]]
+name = "oxc_traverse"
+version = "0.112.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b66d5f2c7cb914d0b773560986d39b0ae5efcf59ce2367c45d4e30f551500b4"
+dependencies = [
+ "itoa",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_data_structures",
+ "oxc_ecmascript",
+ "oxc_semantic",
+ "oxc_span",
+ "oxc_syntax",
+ "rustc-hash 2.1.1",
 ]
 
 [[package]]
@@ -6763,6 +7139,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8a2f0d8d040d7848a709caf78912debcc3f33ee4b3cac47d73d1e1069e83507"
 dependencies = [
  "portable-atomic",
+]
+
+[[package]]
+name = "postcard"
+version = "1.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6764c3b5dd454e283a30e6dfe78e9b31096d9e32036b5d1eaac7a6119ccb9a24"
+dependencies = [
+ "cobs",
+ "embedded-io 0.4.0",
+ "embedded-io 0.6.1",
+ "serde",
 ]
 
 [[package]]
@@ -7533,6 +7921,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ropey"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93411e420bcd1a75ddd1dc3caf18c23155eda2c090631a85af21ba19e97093b5"
+dependencies = [
+ "smallvec",
+ "str_indices",
+]
+
+[[package]]
 name = "ruint"
 version = "1.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7918,6 +8316,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "self_cell"
+version = "1.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b12e76d157a900eb52e81bc6e9f3069344290341720e9178cde2407113ac8d89"
+
+[[package]]
 name = "semver"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8228,6 +8632,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e320a6c5ad31d271ad523dcf3ad13e2767ad8b1cb8f047f75a8aeaf8da139da2"
 
 [[package]]
+name = "similar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
+
+[[package]]
 name = "simple_asn1"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8367,6 +8777,12 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "str_indices"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d08889ec5408683408db66ad89e0e1f93dff55c73a4ccc71c427d5b277ee47e6"
 
 [[package]]
 name = "stream-cancel"
@@ -9985,8 +10401,20 @@ dependencies = [
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.26.4",
- "tungstenite",
+ "tungstenite 0.26.2",
  "webpki-roots 0.26.11",
+]
+
+[[package]]
+name = "tokio-tungstenite"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d25a406cddcc431a75d3d9afc6a7c0f7428d4891dd973e4d54c56b46127bf857"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite 0.28.0",
 ]
 
 [[package]]
@@ -10143,6 +10571,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-opentelemetry"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc58af5d3f6c5811462cabb3289aec0093f7338e367e5a33d28c0433b3c7360b"
+dependencies = [
+ "js-sys",
+ "once_cell",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "smallvec",
+ "tracing",
+ "tracing-core",
+ "tracing-log",
+ "tracing-subscriber",
+ "web-time",
+]
+
+[[package]]
 name = "tracing-serde"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10236,6 +10682,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "tungstenite"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8628dcc84e5a09eb3d8423d6cb682965dea9133204e8fb3efee74c2a0c259442"
+dependencies = [
+ "bytes",
+ "data-encoding",
+ "http 1.4.0",
+ "httparse",
+ "log",
+ "rand 0.9.2",
+ "sha1",
+ "thiserror 2.0.18",
+ "utf-8",
+]
+
+[[package]]
 name = "type-safe-id"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10246,6 +10709,11 @@ dependencies = [
  "thiserror 2.0.18",
  "uuid",
 ]
+
+[[package]]
+name = "type_test_spec"
+version = "0.1.0"
+source = "git+https://github.com/BoundaryML/baml?rev=d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c#d2cc1034826f3b56fa0ad3bcb5c4424de2de8b1c"
 
 [[package]]
 name = "typed-arena"
@@ -10535,9 +11003,9 @@ checksum = "b8dad83b4f25e74f184f64c43b150b91efe7647395b42289f38e50566d82855b"
 
 [[package]]
 name = "wasm-bindgen"
-version = "0.2.101"
+version = "0.2.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e14915cadd45b529bb8d1f343c4ed0ac1de926144b746e2710f9cd05df6603b"
+checksum = "da95793dfc411fbbd93f5be7715b0578ec61fe87cb1a42b12eb625caa5c5ea60"
 dependencies = [
  "cfg-if",
  "once_cell",
@@ -10547,24 +11015,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "wasm-bindgen-backend"
-version = "0.2.101"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e28d1ba982ca7923fd01448d5c30c6864d0a14109560296a162f80f305fb93bb"
-dependencies = [
- "bumpalo",
- "log",
- "proc-macro2",
- "quote",
- "syn 2.0.114",
- "wasm-bindgen-shared",
-]
-
-[[package]]
 name = "wasm-bindgen-futures"
-version = "0.4.51"
+version = "0.4.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ca85039a9b469b38336411d6d6ced91f3fc87109a2a27b0c197663f5144dffe"
+checksum = "551f88106c6d5e7ccc7cd9a16f312dd3b5d36ea8b4954304657d5dfba115d4a0"
 dependencies = [
  "cfg-if",
  "js-sys",
@@ -10575,9 +11029,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro"
-version = "0.2.101"
+version = "0.2.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c3d463ae3eff775b0c45df9da45d68837702ac35af998361e2c84e7c5ec1b0d"
+checksum = "04264334509e04a7bf8690f2384ef5265f05143a4bff3889ab7a3269adab59c2"
 dependencies = [
  "quote",
  "wasm-bindgen-macro-support",
@@ -10585,22 +11039,22 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro-support"
-version = "0.2.101"
+version = "0.2.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bb4ce89b08211f923caf51d527662b75bdc9c9c7aab40f86dcb9fb85ac552aa"
+checksum = "420bc339d9f322e562942d52e115d57e950d12d88983a14c79b86859ee6c7ebc"
 dependencies = [
+ "bumpalo",
  "proc-macro2",
  "quote",
  "syn 2.0.114",
- "wasm-bindgen-backend",
  "wasm-bindgen-shared",
 ]
 
 [[package]]
 name = "wasm-bindgen-shared"
-version = "0.2.101"
+version = "0.2.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f143854a3b13752c6950862c906306adb27c7e839f7414cec8fea35beab624c1"
+checksum = "76f218a38c84bcb33c25ec7059b07847d465ce0e0a76b995e134a45adcb6af76"
 dependencies = [
  "unicode-ident",
 ]
@@ -10634,9 +11088,9 @@ dependencies = [
 
 [[package]]
 name = "web-sys"
-version = "0.3.78"
+version = "0.3.82"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77e4b637749ff0d92b8fad63aa1f7cff3cbe125fd49c175cd6345e7272638b12"
+checksum = "3a1f95c0d03a47f4ae1f7a64643a6bb97465d9b740f0fa8f90ea33915c99a9a1"
 dependencies = [
  "js-sys",
  "wasm-bindgen",

@@ -272,6 +272,7 @@ impl ToolInterceptor for SpendLimitInterceptor {
 mod tests {
     use super::*;
     use crate::tokens::addresses;
+    use baml_rt::generate_context_id;
     use serde_json::json;
 
     #[tokio::test]
@@ -287,6 +288,7 @@ mod tests {
                 "amount": "50000000", // 50 USDC (6 decimals)
                 "amount_usd": 50.0    // Explicit USD value
             }),
+            context_id: generate_context_id(),
             metadata: json!({}),
         };
 
@@ -306,6 +308,7 @@ mod tests {
                 "input_token": addresses::USDC_ETH.to_string(),
                 "amount": "50000000" // 50 USDC (6 decimals) - no explicit amount_usd
             }),
+            context_id: generate_context_id(),
             metadata: json!({}),
         };
 
@@ -326,6 +329,7 @@ mod tests {
                 "amount": "200000000", // 200 USDC
                 "amount_usd": 200.0    // Explicit USD value
             }),
+            context_id: generate_context_id(),
             metadata: json!({}),
         };
 
@@ -345,6 +349,7 @@ mod tests {
                 "input_token": addresses::USDC_ETH.to_string(),
                 "amount": "200000000" // 200 USDC - no explicit amount_usd
             }),
+            context_id: generate_context_id(),
             metadata: json!({}),
         };
 
@@ -364,6 +369,7 @@ mod tests {
                 "input_token": addresses::USDC_ETH.to_string(),
                 "amount": "999999999999" // Huge amount
             }),
+            context_id: generate_context_id(),
             metadata: json!({}),
         };
 
@@ -386,6 +392,7 @@ mod tests {
                 "input_token": unknown_token,
                 "amount": "999999999999999999999" // Huge amount
             }),
+            context_id: generate_context_id(),
             metadata: json!({}),
         };
 
@@ -408,6 +415,7 @@ mod tests {
                 "input_token": unknown_token,
                 "amount": "1000000" // Even small amount blocked
             }),
+            context_id: generate_context_id(),
             metadata: json!({}),
         };
 
@@ -431,6 +439,7 @@ mod tests {
                 "amount": "1000000",
                 "amount_usd": 50.0 // Explicit USD bypasses unknown token check
             }),
+            context_id: generate_context_id(),
             metadata: json!({}),
         };
 
@@ -451,6 +460,7 @@ mod tests {
                 "input_token": addresses::WETH_ETH.to_string(),
                 "amount": "1000000000000000000" // 1 WETH (18 decimals) ~ $3500
             }),
+            context_id: generate_context_id(),
             metadata: json!({}),
         };
 
@@ -473,6 +483,7 @@ mod tests {
                 "amount": "1000000000000000000", // 1 WETH
                 "amount_usd": 3500.0             // ~$3500 at current prices
             }),
+            context_id: generate_context_id(),
             metadata: json!({}),
         };
 

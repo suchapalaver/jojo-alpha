@@ -69,6 +69,7 @@ impl ToolInterceptor for SlippageGuardInterceptor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use baml_rt::generate_context_id;
     use serde_json::json;
 
     #[tokio::test]
@@ -82,6 +83,7 @@ mod tests {
                 "action": "prepare_swap",
                 "slippage_percent": 0.5
             }),
+            context_id: generate_context_id(),
             metadata: json!({}),
         };
 
@@ -100,6 +102,7 @@ mod tests {
                 "action": "prepare_swap",
                 "slippage_percent": 5.0
             }),
+            context_id: generate_context_id(),
             metadata: json!({}),
         };
 

@@ -207,6 +207,7 @@ fn truncate_result(result: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use baml_rt::generate_context_id;
     use serde_json::json;
     use tempfile::NamedTempFile;
 
@@ -223,6 +224,7 @@ mod tests {
                 "input_token": "0x...",
                 "amount": "1000000"
             }),
+            context_id: generate_context_id(),
             metadata: json!({}),
         };
 

@@ -92,6 +92,7 @@ impl ToolInterceptor for CooldownInterceptor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use baml_rt::generate_context_id;
     use serde_json::json;
 
     #[tokio::test]
@@ -104,6 +105,7 @@ mod tests {
             args: json!({
                 "action": "prepare_swap"
             }),
+            context_id: generate_context_id(),
             metadata: json!({}),
         };
 
@@ -121,6 +123,7 @@ mod tests {
             args: json!({
                 "action": "prepare_swap"
             }),
+            context_id: generate_context_id(),
             metadata: json!({}),
         };
 
@@ -155,6 +158,7 @@ mod tests {
             args: json!({
                 "action": "quote"
             }),
+            context_id: generate_context_id(),
             metadata: json!({}),
         };
 

@@ -43,7 +43,7 @@ TypeScript Agent (QuickJS sandbox)
 
 ## Dependencies
 
-This project depends on [baml-ts-sandbox](https://github.com/suchapalaver/baml-ts-sandbox), a QuickJS-based runtime for executing TypeScript agents in a secure sandbox. It's pulled automatically via Cargo from the git repository.
+This project depends on the upstream [baml-ts-sandbox](https://github.com/ryan-s-roberts/baml-ts-sandbox) workspace, which provides the `baml-rt` facade crate plus A2A, observability, provenance, and the agent builder/runner toolchain.
 
 ## Quick Start
 
@@ -68,6 +68,34 @@ cargo run -- quote --input <token> --output <token> --amount <wei>
 | `GRAPH_API_KEY` | For queries | [The Graph API key](https://thegraph.com/studio/) |
 | `OPENROUTER_API_KEY` | For trading | LLM inference via OpenRouter |
 | `PRIVATE_KEY` | Optional | Wallet key (hex, with or without 0x) |
+| `BAML_QJS_MEMORY_LIMIT_BYTES` | Optional | Cap QuickJS memory usage (bytes) |
+| `BAML_QJS_MAX_STACK_BYTES` | Optional | Cap QuickJS stack size (bytes) |
+| `BAML_QJS_GC_THRESHOLD` | Optional | GC threshold for QuickJS allocations |
+| `BAML_QJS_GC_INTERVAL_SECS` | Optional | Periodic full GC interval |
+
+### BAML Runtime Showcase (Upstream Features)
+
+This repo is meant to be a demo/template for the baml-ts-sandbox runtime. The upstream workspace ships a full toolchain and observability stack you can use alongside this project:
+
+- **Agent builder**: lint, typegen, compile TS, and package agents.
+- **Agent runner**: load packaged agents and serve A2A requests.
+- **A2A protocol + eventing**: structured agent-to-agent RPC with streaming.
+- **Observability**: tracing setup + OpenTelemetry metrics hooks.
+- **Provenance**: attach and persist execution context for replay/debug.
+
+Example (from the upstream repo checkout):
+
+```bash
+# Build + package this agent
+cd ../baml-ts-sandbox
+cargo run -p baml-rt-builder --bin baml-agent-builder -- \
+  --agent-path ../defi-trading-agent/agent \
+  --out ./agent.tar.gz
+
+# Run the packaged agent with A2A support
+cargo run -p baml-agent-runner --bin baml-agent-runner -- \
+  --agent ./agent.tar.gz
+```
 
 ### A note on private key management
 

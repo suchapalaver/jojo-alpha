@@ -12,7 +12,7 @@ use crate::tools::{OdosTool, PaperTradingTool, TheGraphTool, WalletTool};
 use crate::wallet::SecureWallet;
 use crate::Result;
 use baml_rt::quickjs_bridge::QuickJSBridge;
-use baml_rt::{Runtime, RuntimeBuilder};
+use baml_rt::{QuickJSConfig, Runtime, RuntimeBuilder};
 use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
@@ -25,6 +25,52 @@ pub struct AgentRunner {
     dry_run: bool,
     wallet: Option<SecureWallet>,
     paper_trading: Option<PaperTradingState>,
+}
+
+fn quickjs_config_from_env() -> QuickJSConfig {
+    let mut config = QuickJSConfig::new();
+
+    if let Some(limit) = parse_u64_env("BAML_QJS_MEMORY_LIMIT_BYTES") {
+        config = config.with_memory_limit(Some(limit));
+        info!(
+            memory_limit_bytes = limit,
+            "Configured QuickJS memory limit"
+        );
+    }
+
+    if let Some(size) = parse_u64_env("BAML_QJS_MAX_STACK_BYTES") {
+        config = config.with_max_stack_size(Some(size));
+        info!(max_stack_bytes = size, "Configured QuickJS max stack size");
+    }
+
+    if let Some(threshold) = parse_u64_env("BAML_QJS_GC_THRESHOLD") {
+        config = config.with_gc_threshold(Some(threshold));
+        info!(gc_threshold = threshold, "Configured QuickJS GC threshold");
+    }
+
+    if let Some(interval_secs) = parse_u64_env("BAML_QJS_GC_INTERVAL_SECS") {
+        let interval = std::time::Duration::from_secs(interval_secs);
+        config = config.with_gc_interval(Some(interval));
+        info!(
+            gc_interval_secs = interval_secs,
+            "Configured QuickJS GC interval"
+        );
+    }
+
+    config
+}
+
+fn parse_u64_env(name: &str) -> Option<u64> {
+    match std::env::var(name) {
+        Ok(value) => match value.parse::<u64>() {
+            Ok(parsed) => Some(parsed),
+            Err(err) => {
+                warn!(env_var = name, error = %err, "Invalid QuickJS env override");
+                None
+            }
+        },
+        Err(_) => None,
+    }
 }
 
 impl AgentRunner {
@@ -187,7 +233,8 @@ impl AgentRunner {
 
         let mut builder = RuntimeBuilder::new()
             .with_schema_path(baml_src_str)
-            .with_quickjs(true);
+            .with_quickjs(true)
+            .with_quickjs_config(quickjs_config_from_env());
 
         // Add environment variables for LLM providers
         if let Ok(api_key) = std::env::var("OPENROUTER_API_KEY") {
@@ -437,15 +484,11 @@ impl AgentRunner {
             }
         }
 
-        // Keep the QuickJS event loop running to drive async operations
-        // This loop will run forever, driving the trading agent
-        info!("Entering main event loop to drive trading agent...");
+        // Keep the process alive to let QuickJS async operations run.
+        // The runtime's internal event loop handles promise resolution via exe_rt_task_in_event_loop.
+        info!("Agent running. Press Ctrl+C to stop.");
         loop {
-            // Drive the QuickJS event loop
-            bridge_guard.drive_event_loop().await;
-
-            // Small delay to prevent busy-waiting
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
         }
     }
 }
