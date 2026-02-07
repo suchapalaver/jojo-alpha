@@ -97,6 +97,12 @@ cargo run -p baml-agent-runner --bin baml-agent-runner -- \
   --agent ./agent.tar.gz
 ```
 
+Or use the helper script:
+
+```bash
+./scripts/demo_baml_runtime.sh
+```
+
 ### A note on private key management
 
 The `PRIVATE_KEY` environment variable is convenient for development and paper trading, but **not recommended for production** with significant funds. Better options:

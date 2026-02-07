@@ -484,11 +484,12 @@ impl AgentRunner {
             }
         }
 
-        // Keep the process alive to let QuickJS async operations run.
-        // The runtime's internal event loop handles promise resolution via exe_rt_task_in_event_loop.
+        // Keep the process alive and explicitly poll the QuickJS event loop
+        // so timers/promises progress even without additional evaluate() calls.
         info!("Agent running. Press Ctrl+C to stop.");
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+            bridge_guard.poll_event_loop();
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
     }
 }
