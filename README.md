@@ -89,6 +89,59 @@ cargo run --bin telemetry-harness -- \
 The harness asserts that tool call provenance events were recorded and writes
 all provenance events to the JSONL file.
 
+## A2A Flow (baml-ts-sandbox)
+
+```text
+JSON-RPC request (message.send)
+        ↓
+A2aAgent (baml-rt-a2a)
+        ↓
+QuickJSBridge (sandbox)
+        ↓
+globalThis.handle_a2a_request(...)
+        ↓
+invokeTool(...) → Rust tools (Graph/Odos/Wallet/Paper)
+        ↓
+Provenance + telemetry emitted
+```
+
+Minimal handler shape (inside the sandbox):
+
+```js
+globalThis.handle_a2a_request = async function(request) {
+  const ctx = request?.params?.message?.contextId || "ctx-missing";
+  const metrics = await invokeTool("paper_trading", { action: "get_metrics" });
+  return {
+    task: {
+      id: "task-telemetry",
+      contextId: ctx,
+      status: { state: "TASK_STATE_COMPLETED" },
+      artifacts: [
+        { name: "paper_metrics", parts: [{ text: JSON.stringify(metrics) }] }
+      ]
+    }
+  };
+};
+```
+
+Minimal A2A request shape (typed in Rust via `baml_rt_a2a::a2a_types`):
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "message.send",
+  "params": {
+    "message": {
+      "messageId": "msg-telemetry",
+      "role": "ROLE_USER",
+      "parts": [{ "text": "telemetry harness ping" }],
+      "contextId": "ctx-telemetry-harness"
+    }
+  },
+  "id": "req-telemetry"
+}
+```
+
 ### BAML Runtime Showcase (Upstream Features)
 
 This repo is meant to be a demo/template for the baml-ts-sandbox runtime. The upstream workspace ships a full toolchain and observability stack you can use alongside this project:
