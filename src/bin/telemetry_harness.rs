@@ -547,6 +547,8 @@ struct TelemetrySnapshot {
     window_ms: u64,
     tool_calls: NonEmptyVec<ToolTelemetry>,
     totals: TelemetryTotals,
+    policy: PolicySummary,
+    costs: CostSummary,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -557,6 +559,9 @@ struct ToolTelemetry {
     failures: u64,
     avg_duration_ms: Option<f64>,
     error_classes: Vec<ErrorClassCount>,
+    success_rate: f64,
+    policy: PolicyDecision,
+    costs: CostHint,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -564,12 +569,38 @@ struct TelemetryTotals {
     tool_calls: u64,
     tool_successes: u64,
     tool_failures: u64,
+    avg_duration_ms: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ErrorClassCount {
     class: ErrorClass,
     count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PolicyDecision {
+    allowed: bool,
+    rule_id: Option<String>,
+    reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PolicySummary {
+    mode: String,
+    decisions: Vec<PolicyDecision>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CostHint {
+    estimated_usd: f64,
+    tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CostSummary {
+    total_estimated_usd: f64,
+    total_tokens: u64,
 }
 
 async fn write_snapshot(
@@ -629,6 +660,14 @@ async fn write_snapshot(
         tool_calls: 0,
         tool_successes: 0,
         tool_failures: 0,
+        avg_duration_ms: None,
+    };
+    let mut total_duration: u64 = 0;
+    let mut total_duration_count: u64 = 0;
+    let mut policy_decisions = Vec::new();
+    let mut cost_summary = CostSummary {
+        total_estimated_usd: 0.0,
+        total_tokens: 0,
     };
 
     for (tool, (successes, failures)) in counts {
@@ -637,6 +676,8 @@ async fn write_snapshot(
             None
         } else {
             let sum: u64 = durations.iter().sum();
+            total_duration += sum;
+            total_duration_count += durations.len() as u64;
             Some(sum as f64 / durations.len() as f64)
         };
         let calls = successes + failures;
@@ -656,6 +697,16 @@ async fn write_snapshot(
             })
             .unwrap_or_default();
 
+        let policy = default_policy_for_tool(&tool);
+        policy_decisions.push(policy.clone());
+
+        let costs = CostHint {
+            estimated_usd: 0.0,
+            tokens: 0,
+        };
+        cost_summary.total_estimated_usd += costs.estimated_usd;
+        cost_summary.total_tokens += costs.tokens;
+
         tool_calls_vec.push(ToolTelemetry {
             tool: tool.clone(),
             calls,
@@ -663,6 +714,13 @@ async fn write_snapshot(
             failures,
             avg_duration_ms: avg,
             error_classes: classes,
+            success_rate: if calls == 0 {
+                0.0
+            } else {
+                successes as f64 / calls as f64
+            },
+            policy,
+            costs,
         });
     }
 
@@ -673,6 +731,12 @@ async fn write_snapshot(
         .map(|event| event.context_id.to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
+    totals.avg_duration_ms = if total_duration_count == 0 {
+        None
+    } else {
+        Some(total_duration as f64 / total_duration_count as f64)
+    };
+
     let snapshot = TelemetrySnapshot {
         snapshot_version: SnapshotVersion::V1,
         schema_hash: SnapshotSchemaHash(snapshot_schema_hash()),
@@ -681,6 +745,11 @@ async fn write_snapshot(
         window_ms,
         tool_calls,
         totals,
+        policy: PolicySummary {
+            mode: "default-deny".to_string(),
+            decisions: policy_decisions,
+        },
+        costs: cost_summary,
     };
 
     let contents = serde_json::to_vec_pretty(&snapshot)?;
@@ -703,7 +772,7 @@ fn now_millis() -> u64 {
 }
 
 fn snapshot_schema_hash() -> String {
-    const SCHEMA: &str = "TelemetrySnapshot(v1):context_id,generated_at_ms,window_ms,tool_calls[tool,calls,successes,failures,avg_duration_ms,error_classes[class,count]],totals[tool_calls,tool_successes,tool_failures]";
+    const SCHEMA: &str = "TelemetrySnapshot(v1):context_id,generated_at_ms,window_ms,tool_calls[tool,calls,successes,failures,avg_duration_ms,error_classes[class,count],success_rate,policy[allowed,rule_id,reason],costs[estimated_usd,tokens]],totals[tool_calls,tool_successes,tool_failures,avg_duration_ms],policy[mode,decisions],costs[total_estimated_usd,total_tokens]";
     blake3::hash(SCHEMA.as_bytes()).to_hex().to_string()
 }
 
@@ -737,6 +806,14 @@ fn classify_error(metadata: &serde_json::Value) -> ErrorClass {
         ErrorClass::Permanent
     } else {
         ErrorClass::Unknown
+    }
+}
+
+fn default_policy_for_tool(tool: &ToolName) -> PolicyDecision {
+    PolicyDecision {
+        allowed: true,
+        rule_id: Some(format!("allow:{}", tool.0)),
+        reason: "allowed by harness policy".to_string(),
     }
 }
 
