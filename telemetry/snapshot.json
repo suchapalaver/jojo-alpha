@@ -2,7 +2,7 @@
   "snapshot_version": "v1",
   "schema_hash": "e1c88934ea2a3f560c4ddca6a2bde8dacb5ac92a29f04f4e8fb47dcc12715b3a",
   "context_id": "ctx-telemetry-harness",
-  "generated_at_ms": 1770495240138,
+  "generated_at_ms": 1770495662113,
   "window_ms": 3,
   "tool_calls": {
     "head": {

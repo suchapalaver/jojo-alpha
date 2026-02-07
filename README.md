@@ -82,6 +82,11 @@ cargo run -- quote --input <token> --output <token> --amount <wei>
 | `BAML_QJS_MAX_STACK_BYTES` | Optional | Cap QuickJS stack size (bytes) |
 | `BAML_QJS_GC_THRESHOLD` | Optional | GC threshold for QuickJS allocations |
 | `BAML_QJS_GC_INTERVAL_SECS` | Optional | Periodic full GC interval |
+| `TELEMETRY_COST_ODOS_USD` | Optional | Override per-call Odos cost estimate (USD) |
+| `TELEMETRY_COST_GRAPH_USD` | Optional | Override per-call The Graph cost estimate (USD) |
+| `TELEMETRY_COST_WALLET_USD` | Optional | Override per-call wallet cost estimate (USD) |
+| `TELEMETRY_COST_PAPER_USD` | Optional | Override per-call paper trading cost estimate (USD) |
+| `TELEMETRY_COST_DEFAULT_USD` | Optional | Override per-call default cost estimate (USD) |
 
 ## Telemetry Harness (A2A + Provenance)
 

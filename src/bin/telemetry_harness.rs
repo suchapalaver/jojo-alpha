@@ -317,7 +317,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!(responses = %responses_json, "A2A response");
 
     let events = assert_provenance_events(&memory_store, &context_id.as_context_id()).await?;
-    write_snapshot(&args.snapshot_out, &events, &policy).await?;
+    let cost_model = CostModel::from_env();
+    write_snapshot(&args.snapshot_out, &events, &policy, &cost_model).await?;
 
     tracing::info!(
         provenance_out = %args.provenance_out.display(),
@@ -647,6 +648,63 @@ struct CostSummary {
 }
 
 #[derive(Debug, Clone)]
+struct CostModel {
+    odos_usd_per_call: f64,
+    graph_usd_per_call: f64,
+    wallet_usd_per_call: f64,
+    paper_usd_per_call: f64,
+    default_usd_per_call: f64,
+}
+
+impl Default for CostModel {
+    fn default() -> Self {
+        Self {
+            odos_usd_per_call: 0.001,
+            graph_usd_per_call: 0.0005,
+            wallet_usd_per_call: 0.0002,
+            paper_usd_per_call: 0.0,
+            default_usd_per_call: 0.0001,
+        }
+    }
+}
+
+impl CostModel {
+    fn from_env() -> Self {
+        let mut model = Self::default();
+        if let Some(value) = parse_env_f64("TELEMETRY_COST_ODOS_USD") {
+            model.odos_usd_per_call = value;
+        }
+        if let Some(value) = parse_env_f64("TELEMETRY_COST_GRAPH_USD") {
+            model.graph_usd_per_call = value;
+        }
+        if let Some(value) = parse_env_f64("TELEMETRY_COST_WALLET_USD") {
+            model.wallet_usd_per_call = value;
+        }
+        if let Some(value) = parse_env_f64("TELEMETRY_COST_PAPER_USD") {
+            model.paper_usd_per_call = value;
+        }
+        if let Some(value) = parse_env_f64("TELEMETRY_COST_DEFAULT_USD") {
+            model.default_usd_per_call = value;
+        }
+        model
+    }
+
+    fn estimate_cost(&self, tool: &ToolName, calls: u64) -> CostHint {
+        let per_call = match tool.0.as_str() {
+            PAPER_TRADING_TOOL => self.paper_usd_per_call,
+            QUERY_SUBGRAPH_TOOL => self.graph_usd_per_call,
+            ODOS_SWAP_TOOL => self.odos_usd_per_call,
+            WALLET_BALANCE_TOOL => self.wallet_usd_per_call,
+            _ => self.default_usd_per_call,
+        };
+        CostHint {
+            estimated_usd: per_call * calls as f64,
+            tokens: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct PolicyConfig {
     mode: String,
     rules: HashMap<ToolName, PolicyDecision>,
@@ -701,17 +759,27 @@ impl PolicyConfig {
     }
 }
 
-fn estimate_cost(tool: &ToolName, calls: u64) -> CostHint {
-    let per_call_usd = match tool.0.as_str() {
-        PAPER_TRADING_TOOL => 0.0,
-        QUERY_SUBGRAPH_TOOL => 0.0005,
-        ODOS_SWAP_TOOL => 0.001,
-        WALLET_BALANCE_TOOL => 0.0002,
-        _ => 0.0001,
-    };
-    CostHint {
-        estimated_usd: per_call_usd * calls as f64,
-        tokens: 0,
+fn parse_env_f64(name: &str) -> Option<f64> {
+    match std::env::var(name) {
+        Ok(value) => match value.parse::<f64>() {
+            Ok(parsed) => {
+                if parsed < 0.0 {
+                    tracing::warn!(
+                        env_var = name,
+                        value = parsed,
+                        "Negative cost override ignored"
+                    );
+                    None
+                } else {
+                    Some(parsed)
+                }
+            }
+            Err(err) => {
+                tracing::warn!(env_var = name, error = %err, "Invalid cost env override");
+                None
+            }
+        },
+        Err(_) => None,
     }
 }
 
@@ -719,6 +787,7 @@ async fn write_snapshot(
     path: &Path,
     events: &[baml_rt_provenance::ProvEvent],
     policy: &PolicyConfig,
+    cost_model: &CostModel,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use baml_rt_provenance::ProvEventData;
 
@@ -823,7 +892,7 @@ async fn write_snapshot(
             });
         }
 
-        let costs = estimate_cost(&tool, calls);
+        let costs = cost_model.estimate_cost(&tool, calls);
         cost_summary.total_estimated_usd += costs.estimated_usd;
         cost_summary.total_tokens += costs.tokens;
 
@@ -1033,7 +1102,8 @@ mod tests {
         let path = dir.path().join("snapshot.json");
 
         let policy = PolicyConfig::default();
-        write_snapshot(&path, &events, &policy)
+        let cost_model = CostModel::default();
+        write_snapshot(&path, &events, &policy, &cost_model)
             .await
             .expect("write snapshot");
         let contents = fs::read_to_string(&path).await.expect("read snapshot");
