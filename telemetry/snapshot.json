@@ -1,0 +1,23 @@
+{
+  "snapshot_version": "v1",
+  "schema_hash": "91f8fe04d48701ad0bdf786a8b9f8a46e66b6ee2a269776f79e95d2952f16abc",
+  "context_id": "ctx-telemetry-harness",
+  "generated_at_ms": 1770433624680,
+  "window_ms": 3,
+  "tool_calls": {
+    "head": {
+      "tool": "paper_trading",
+      "calls": 2,
+      "successes": 2,
+      "failures": 0,
+      "avg_duration_ms": 0.0,
+      "error_classes": []
+    },
+    "tail": []
+  },
+  "totals": {
+    "tool_calls": 2,
+    "tool_successes": 2,
+    "tool_failures": 0
+  }
+}

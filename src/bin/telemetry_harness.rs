@@ -14,8 +14,10 @@ use baml_rt_provenance::{InMemoryProvenanceStore, ProvEventType, ProvenanceWrite
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::fs::{create_dir_all, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
@@ -43,6 +45,143 @@ struct HarnessArgs {
     #[arg(long, default_value = "telemetry harness ping")]
     message: String,
 }
+
+#[derive(Debug, Clone)]
+struct HarnessContextId(String);
+
+impl HarnessContextId {
+    fn new(value: &str) -> Option<Self> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(Self(trimmed.to_string()))
+        }
+    }
+
+    fn as_context_id(&self) -> ContextId {
+        ContextId::from(self.0.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+struct HarnessMessageId(String);
+
+impl HarnessMessageId {
+    fn new(value: &str) -> Option<Self> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(Self(trimmed.to_string()))
+        }
+    }
+
+    fn as_message_id(&self) -> MessageId {
+        MessageId::from(self.0.clone())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Hash)]
+#[serde(transparent)]
+struct ToolName(String);
+
+impl ToolName {
+    fn new(value: &str) -> Option<Self> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else if is_valid_tool_name(trimmed) {
+            Some(Self(trimmed.to_string()))
+        } else {
+            None
+        }
+    }
+
+    #[cfg(test)]
+    fn from_literal(value: &'static str) -> Self {
+        debug_assert!(is_valid_tool_name(value), "invalid tool name literal");
+        Self(value.to_string())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum SnapshotVersion {
+    V1,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+struct SnapshotSchemaHash(String);
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Hash)]
+#[serde(rename_all = "snake_case")]
+enum ErrorClass {
+    Transient,
+    Permanent,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Redacted {
+    redacted: bool,
+    hash: String,
+}
+
+impl Redacted {
+    fn from_json(value: &serde_json::Value) -> Self {
+        Self {
+            redacted: true,
+            hash: hash_json(value),
+        }
+    }
+
+    fn to_value(&self) -> serde_json::Value {
+        json!({
+            "redacted": self.redacted,
+            "hash": self.hash,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NonEmptyVec<T> {
+    head: T,
+    tail: Vec<T>,
+}
+
+impl<T> NonEmptyVec<T> {
+    fn try_from_vec(mut items: Vec<T>) -> Option<Self> {
+        if items.is_empty() {
+            None
+        } else {
+            let head = items.remove(0);
+            Some(Self { head, tail: items })
+        }
+    }
+}
+
+const fn is_valid_tool_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    let mut idx = 0;
+    while idx < bytes.len() {
+        let ch = bytes[idx];
+        let ok = (ch >= b'a' && ch <= b'z') || (ch >= b'0' && ch <= b'9') || ch == b'_';
+        if !ok {
+            return false;
+        }
+        idx += 1;
+    }
+    true
+}
+
+const PAPER_TRADING_TOOL: &str = "paper_trading";
+const _: () = {
+    if !is_valid_tool_name(PAPER_TRADING_TOOL) {
+        panic!("invalid tool name literal");
+    }
+};
 
 struct JsonlProvenanceWriter {
     file: Mutex<tokio::fs::File>,
@@ -145,13 +284,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .await?;
 
-    let context_id = ContextId::from("ctx-telemetry-harness");
-    let request_value = build_message_request(&args.message, context_id.clone());
+    let context_id =
+        HarnessContextId::new("ctx-telemetry-harness").ok_or("Invalid harness context id")?;
+    let request_value = build_message_request(&args.message, &context_id);
     let responses = agent.handle_a2a(request_value).await?;
     let responses_json = serde_json::to_string(&responses)?;
     tracing::info!(responses = %responses_json, "A2A response");
 
-    let events = assert_provenance_events(&memory_store, &context_id).await?;
+    let events = assert_provenance_events(&memory_store, &context_id.as_context_id()).await?;
     write_snapshot(&args.snapshot_out, &events).await?;
 
     tracing::info!(
@@ -208,7 +348,7 @@ async fn register_a2a_handler(bridge: &Arc<Mutex<baml_rt::QuickJSBridge>>) -> ba
     let js_code = r#"
         globalThis.handle_a2a_request = async function(request) {
             const ctx = request?.params?.message?.contextId || "ctx-missing";
-            const metrics = await invokeTool("paper_trading", { action: "get_metrics" });
+            const metrics = await invokeTool("paper_trading", { action: "get_metrics", error_class: "transient" });
             return {
                 task: {
                     id: "task-telemetry",
@@ -230,16 +370,17 @@ async fn register_a2a_handler(bridge: &Arc<Mutex<baml_rt::QuickJSBridge>>) -> ba
     Ok(())
 }
 
-fn build_message_request(message: &str, context_id: ContextId) -> serde_json::Value {
+fn build_message_request(message: &str, context_id: &HarnessContextId) -> serde_json::Value {
+    let message_id = HarnessMessageId::new("msg-telemetry").expect("message id must be non-empty");
     let params = SendMessageRequest {
         message: Message {
-            message_id: MessageId::from("msg-telemetry"),
+            message_id: message_id.as_message_id(),
             role: MessageRole::String(ROLE_USER.to_string()),
             parts: vec![Part {
                 text: Some(message.to_string()),
                 ..Part::default()
             }],
-            context_id: Some(context_id),
+            context_id: Some(context_id.as_context_id()),
             task_id: None,
             reference_task_ids: Vec::new(),
             extensions: Vec::new(),
@@ -327,10 +468,8 @@ fn sanitize_event(event: baml_rt_provenance::ProvEvent) -> baml_rt_provenance::P
             duration_ms,
             success,
         } => {
-            let redacted = json!({
-                "redacted": true,
-                "hash": hash_json(&args),
-            });
+            let redacted = Redacted::from_json(&args).to_value();
+            let metadata = enrich_metadata_with_error_class(metadata, &args);
             baml_rt_provenance::ProvEvent {
                 data: ProvEventData::ToolCall {
                     tool_name,
@@ -352,10 +491,8 @@ fn sanitize_event(event: baml_rt_provenance::ProvEvent) -> baml_rt_provenance::P
             duration_ms,
             success,
         } => {
-            let redacted = json!({
-                "redacted": true,
-                "hash": hash_json(&prompt),
-            });
+            let redacted = Redacted::from_json(&prompt).to_value();
+            let metadata = enrich_metadata_with_error_class(metadata, &prompt);
             baml_rt_provenance::ProvEvent {
                 data: ProvEventData::LlmCall {
                     client,
@@ -378,20 +515,48 @@ fn hash_json(value: &serde_json::Value) -> String {
     blake3::hash(&bytes).to_hex().to_string()
 }
 
+fn enrich_metadata_with_error_class(
+    mut metadata: serde_json::Value,
+    args: &serde_json::Value,
+) -> serde_json::Value {
+    if metadata.get("error_class").is_some() {
+        return metadata;
+    }
+    let Some(class) = args.get("error_class").and_then(|v| v.as_str()) else {
+        return metadata;
+    };
+    match metadata.as_object_mut() {
+        Some(map) => {
+            map.insert("error_class".to_string(), json!(class));
+        }
+        None => {
+            let mut map = serde_json::Map::new();
+            map.insert("error_class".to_string(), json!(class));
+            metadata = serde_json::Value::Object(map);
+        }
+    }
+    metadata
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct TelemetrySnapshot {
+    snapshot_version: SnapshotVersion,
+    schema_hash: SnapshotSchemaHash,
     context_id: String,
-    tool_calls: Vec<ToolTelemetry>,
+    generated_at_ms: u64,
+    window_ms: u64,
+    tool_calls: NonEmptyVec<ToolTelemetry>,
     totals: TelemetryTotals,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ToolTelemetry {
-    tool: String,
+    tool: ToolName,
     calls: u64,
     successes: u64,
     failures: u64,
     avg_duration_ms: Option<f64>,
+    error_classes: Vec<ErrorClassCount>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -401,43 +566,65 @@ struct TelemetryTotals {
     tool_failures: u64,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct ErrorClassCount {
+    class: ErrorClass,
+    count: u64,
+}
+
 async fn write_snapshot(
     path: &Path,
     events: &[baml_rt_provenance::ProvEvent],
 ) -> Result<(), Box<dyn std::error::Error>> {
     use baml_rt_provenance::ProvEventData;
-    use std::collections::HashMap;
 
+    let generated_at_ms = now_millis();
+    let (min_ts, max_ts) = events.iter().fold((u64::MAX, 0u64), |acc, event| {
+        (acc.0.min(event.timestamp_ms), acc.1.max(event.timestamp_ms))
+    });
+    let window_ms = if min_ts == u64::MAX {
+        0
+    } else {
+        max_ts.saturating_sub(min_ts)
+    };
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             create_dir_all(parent).await?;
         }
     }
 
-    let mut stats: HashMap<String, Vec<u64>> = HashMap::new();
-    let mut counts: HashMap<String, (u64, u64)> = HashMap::new();
+    let mut stats: HashMap<ToolName, Vec<u64>> = HashMap::new();
+    let mut counts: HashMap<ToolName, (u64, u64)> = HashMap::new();
+    let mut error_classes: HashMap<ToolName, HashMap<ErrorClass, u64>> = HashMap::new();
 
     for event in events {
         if let ProvEventData::ToolCall {
             tool_name,
             duration_ms,
             success,
+            metadata,
             ..
         } = &event.data
         {
-            let entry = counts.entry(tool_name.clone()).or_insert((0, 0));
+            let Some(tool) = ToolName::new(tool_name) else {
+                continue;
+            };
+            let entry = counts.entry(tool.clone()).or_insert((0, 0));
             if let Some(true) = success {
                 entry.0 += 1;
             } else if let Some(false) = success {
                 entry.1 += 1;
+                let class_counts = error_classes.entry(tool.clone()).or_default();
+                let class = classify_error(metadata);
+                *class_counts.entry(class).or_insert(0) += 1;
             }
             if let Some(duration) = duration_ms {
-                stats.entry(tool_name.clone()).or_default().push(*duration);
+                stats.entry(tool).or_default().push(*duration);
             }
         }
     }
 
-    let mut tool_calls = Vec::new();
+    let mut tool_calls_vec = Vec::new();
     let mut totals = TelemetryTotals {
         tool_calls: 0,
         tool_successes: 0,
@@ -457,22 +644,41 @@ async fn write_snapshot(
         totals.tool_successes += successes;
         totals.tool_failures += failures;
 
-        tool_calls.push(ToolTelemetry {
-            tool,
+        let classes = error_classes
+            .get(&tool)
+            .map(|map| {
+                map.iter()
+                    .map(|(class, count)| ErrorClassCount {
+                        class: class.clone(),
+                        count: *count,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        tool_calls_vec.push(ToolTelemetry {
+            tool: tool.clone(),
             calls,
             successes,
             failures,
             avg_duration_ms: avg,
+            error_classes: classes,
         });
     }
 
+    let tool_calls =
+        NonEmptyVec::try_from_vec(tool_calls_vec).ok_or("No tool call telemetry available")?;
     let context_id = events
         .first()
         .map(|event| event.context_id.to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
     let snapshot = TelemetrySnapshot {
+        snapshot_version: SnapshotVersion::V1,
+        schema_hash: SnapshotSchemaHash(snapshot_schema_hash()),
         context_id,
+        generated_at_ms,
+        window_ms,
         tool_calls,
         totals,
     };
@@ -487,4 +693,142 @@ async fn write_snapshot(
     file.write_all(&contents).await?;
     file.write_all(b"\n").await?;
     Ok(())
+}
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn snapshot_schema_hash() -> String {
+    const SCHEMA: &str = "TelemetrySnapshot(v1):context_id,generated_at_ms,window_ms,tool_calls[tool,calls,successes,failures,avg_duration_ms,error_classes[class,count]],totals[tool_calls,tool_successes,tool_failures]";
+    blake3::hash(SCHEMA.as_bytes()).to_hex().to_string()
+}
+
+fn classify_error(metadata: &serde_json::Value) -> ErrorClass {
+    if let Some(class) = metadata.get("error_class").and_then(|v| v.as_str()) {
+        return match class {
+            "transient" => ErrorClass::Transient,
+            "permanent" => ErrorClass::Permanent,
+            _ => ErrorClass::Unknown,
+        };
+    }
+
+    let hint = metadata
+        .get("error")
+        .or_else(|| metadata.get("error_message"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    if hint.contains("timeout")
+        || hint.contains("rate")
+        || hint.contains("temporar")
+        || hint.contains("retry")
+    {
+        ErrorClass::Transient
+    } else if hint.contains("invalid")
+        || hint.contains("unauthorized")
+        || hint.contains("forbidden")
+        || hint.contains("not found")
+    {
+        ErrorClass::Permanent
+    } else {
+        ErrorClass::Unknown
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use baml_rt_provenance::ProvEvent;
+    use tempfile::tempdir;
+    use tokio::fs;
+
+    #[test]
+    fn sanitize_event_redacts_tool_args() {
+        let ctx = ContextId::from("ctx-test");
+        let event = ProvEvent::tool_call_started(
+            ctx,
+            None,
+            "paper_trading".to_string(),
+            None,
+            json!({"secret":"value","action":"get_metrics"}),
+            json!({}),
+        );
+
+        let sanitized = sanitize_event(event);
+        match sanitized.data {
+            baml_rt_provenance::ProvEventData::ToolCall { args, .. } => {
+                assert_eq!(args.get("redacted").and_then(|v| v.as_bool()), Some(true));
+                assert!(args.get("hash").and_then(|v| v.as_str()).is_some());
+            }
+            _ => panic!("expected tool call event"),
+        }
+    }
+
+    #[test]
+    fn tool_name_validation() {
+        assert!(ToolName::new("paper_trading").is_some());
+        assert!(ToolName::new("odos-swap").is_none());
+        assert!(ToolName::new("Tool").is_none());
+        assert!(ToolName::new(" ").is_none());
+    }
+
+    #[test]
+    fn classify_error_from_metadata() {
+        let transient = json!({"error": "timeout while calling rpc"});
+        let permanent = json!({"error_message": "invalid input"});
+        let explicit = json!({"error_class": "permanent"});
+
+        assert_eq!(classify_error(&transient), ErrorClass::Transient);
+        assert_eq!(classify_error(&permanent), ErrorClass::Permanent);
+        assert_eq!(classify_error(&explicit), ErrorClass::Permanent);
+    }
+
+    #[tokio::test]
+    async fn snapshot_is_versioned_and_non_empty() {
+        let ctx = ContextId::from("ctx-snapshot");
+        let event = ProvEvent::tool_call_completed(
+            ctx,
+            None,
+            ToolName::from_literal(PAPER_TRADING_TOOL).0,
+            None,
+            json!({ "action": "get_metrics" }),
+            json!({}),
+            3,
+            true,
+        );
+        let events = vec![event];
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("snapshot.json");
+
+        write_snapshot(&path, &events)
+            .await
+            .expect("write snapshot");
+        let contents = fs::read_to_string(&path).await.expect("read snapshot");
+        let snapshot: TelemetrySnapshot = serde_json::from_str(&contents).expect("parse snapshot");
+
+        assert_eq!(snapshot.snapshot_version, SnapshotVersion::V1);
+        assert!(!snapshot.schema_hash.0.is_empty());
+        let tool_calls = snapshot.tool_calls;
+        assert_eq!(tool_calls.head.tool.0, "paper_trading");
+        assert_eq!(tool_calls.head.calls, 1);
+    }
+
+    #[test]
+    fn harness_ids_validate_non_empty() {
+        assert!(HarnessContextId::new("ctx").is_some());
+        assert!(HarnessContextId::new(" ").is_none());
+        assert!(HarnessMessageId::new("msg").is_some());
+        assert!(HarnessMessageId::new("").is_none());
+    }
+
+    #[test]
+    fn tool_name_literal_validates() {
+        let tool = ToolName::from_literal(PAPER_TRADING_TOOL);
+        assert_eq!(tool.0, PAPER_TRADING_TOOL);
+    }
 }
