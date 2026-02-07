@@ -92,10 +92,11 @@ The daily spending tracker must accurately sum all executed trades and never exc
 ```
 ∀ tool_call tc:
   tc MUST pass through interceptors in order:
-  1. SpendLimitInterceptor (funds check)
-  2. SlippageGuardInterceptor (price impact check)
-  3. CooldownInterceptor (rate limiting)
-  4. AuditLogInterceptor (logging)
+  1. PolicyInterceptor (policy allow/deny)
+  2. SpendLimitInterceptor (funds check)
+  3. SlippageGuardInterceptor (price impact check)
+  4. CooldownInterceptor (rate limiting)
+  5. AuditLogInterceptor (logging)
   
   AND ∀ interceptor i:
     IF i.intercept_tool_call(tc) = Block(reason)
@@ -114,9 +115,37 @@ All tool calls must pass through the interceptor pipeline in a fixed order, and 
 | **Read-Only Operations** | Quotes (`action = "quote"`) bypass spend limit checks |
 | **Testing** | Integration tests verify interceptor ordering and blocking behavior |
 
-**Code Location:** `src/runner.rs:198-235` (interceptor registration)
+**Code Location:** `src/runner.rs:198-245` (interceptor registration)
 
 **Violation Impact:** HIGH - Risk controls could be bypassed.
+
+---
+
+## 3.1 Policy Enforcement Invariant
+
+**Property:**
+```
+∀ tool_call tc:
+  IF policy.json exists AND policy decision for tc.tool_name = deny
+  THEN tc is blocked with an explainable reason
+  AND tool implementation is never invoked
+```
+
+Policy enforcement must be evaluated before risk controls so explicit deny rules
+cannot be bypassed by downstream checks.
+
+**Enforcement:**
+
+| Layer | Mechanism |
+|-------|-----------|
+| **Interceptor** | `PolicyInterceptor` loads `policy.json` and blocks denied tools |
+| **Explainability** | Block reason includes policy rule id and reason when present |
+| **Fallback** | Missing `policy.json` defaults to allow-all for backward compatibility |
+| **Testing** | Unit tests cover allow/deny decisions and tool name validation |
+
+**Code Location:** `src/interceptors/policy.rs`
+
+**Violation Impact:** HIGH - Policies could be ignored or misapplied.
 
 ---
 
