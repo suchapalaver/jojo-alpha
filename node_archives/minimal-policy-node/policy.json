@@ -6,6 +6,24 @@
       "allowed": true,
       "rule_id": "allow:paper_trading",
       "reason": "read-only metrics for POC"
+    },
+    {
+      "tool": "query_subgraph",
+      "allowed": true,
+      "rule_id": "allow:query_subgraph",
+      "reason": "read-only market data"
+    },
+    {
+      "tool": "wallet_balance",
+      "allowed": true,
+      "rule_id": "allow:wallet_balance",
+      "reason": "read-only balance checks"
+    },
+    {
+      "tool": "odos_swap",
+      "allowed": false,
+      "rule_id": "deny:odos_swap",
+      "reason": "swap execution disabled in demo"
     }
   ]
 }

@@ -5,7 +5,8 @@
 
 use crate::config::{Config, GRAPH_API_KEY_ENV};
 use crate::interceptors::{
-    AuditLogInterceptor, CooldownInterceptor, SlippageGuardInterceptor, SpendLimitInterceptor,
+    AuditLogInterceptor, CooldownInterceptor, PolicyConfig, PolicyInterceptor,
+    SlippageGuardInterceptor, SpendLimitInterceptor,
 };
 use crate::paper_trading::PaperTradingState;
 use crate::tools::{OdosTool, PaperTradingTool, TheGraphTool, WalletTool};
@@ -241,10 +242,25 @@ impl AgentRunner {
             builder = builder.with_env_var("OPENROUTER_API_KEY", api_key);
         }
 
+        // Add tool interceptors for policy + risk management
+        let agent_root = baml_src
+            .parent()
+            .ok_or_else(|| crate::Error::Config("Missing agent directory".to_string()))?;
+        let policy = PolicyConfig::load_from_dir(agent_root)
+            .await
+            .unwrap_or_else(|err| {
+                warn!(error = %err, "Failed to load policy.json; defaulting to allow-all");
+                PolicyConfig::allow_all()
+            });
+
+        let policy_interceptor = PolicyInterceptor::new(policy);
+        builder = builder.with_tool_interceptor(policy_interceptor);
+        info!("Added policy interceptor");
+
         // Add tool interceptors for risk management
         let risk = &self.config.risk;
 
-        // 1. Spend limit interceptor (with configurable mode)
+        // 2. Spend limit interceptor (with configurable mode)
         let spend_limit = SpendLimitInterceptor::with_mode(
             risk.max_trade_usd,
             risk.max_daily_usd,
@@ -258,7 +274,7 @@ impl AgentRunner {
             "Added spend limit interceptor"
         );
 
-        // 2. Slippage guard interceptor
+        // 3. Slippage guard interceptor
         let slippage_guard = SlippageGuardInterceptor::new(risk.max_slippage_percent);
         builder = builder.with_tool_interceptor(slippage_guard);
         info!(
@@ -266,7 +282,7 @@ impl AgentRunner {
             "Added slippage guard interceptor"
         );
 
-        // 3. Cooldown interceptor
+        // 4. Cooldown interceptor
         let cooldown = CooldownInterceptor::new(risk.cooldown_seconds);
         builder = builder.with_tool_interceptor(cooldown);
         info!(
@@ -274,7 +290,7 @@ impl AgentRunner {
             "Added cooldown interceptor"
         );
 
-        // 4. Audit log interceptor
+        // 5. Audit log interceptor
         if let Some(audit_path) = &self.config.audit_log_path {
             let audit_log = AuditLogInterceptor::new(audit_path);
             builder = builder.with_tool_interceptor(audit_log);

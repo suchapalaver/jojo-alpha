@@ -1,9 +1,9 @@
 {
   "snapshot_version": "v1",
-  "schema_hash": "f80d3836af64b7209e2497973fb1b1c3391540f23681efa9fe338ec6e2b778b6",
+  "schema_hash": "e1c88934ea2a3f560c4ddca6a2bde8dacb5ac92a29f04f4e8fb47dcc12715b3a",
   "context_id": "ctx-telemetry-harness",
-  "generated_at_ms": 1770492255899,
-  "window_ms": 1,
+  "generated_at_ms": 1770495240138,
+  "window_ms": 3,
   "tool_calls": {
     "head": {
       "tool": "paper_trading",
@@ -33,13 +33,40 @@
   },
   "policy": {
     "mode": "default-deny",
+    "rules": [
+      {
+        "tool": "odos_swap",
+        "allowed": false,
+        "rule_id": "deny:odos_swap",
+        "reason": "swap execution disabled in demo"
+      },
+      {
+        "tool": "paper_trading",
+        "allowed": true,
+        "rule_id": "allow:paper_trading",
+        "reason": "read-only metrics for POC"
+      },
+      {
+        "tool": "query_subgraph",
+        "allowed": true,
+        "rule_id": "allow:query_subgraph",
+        "reason": "read-only market data"
+      },
+      {
+        "tool": "wallet_balance",
+        "allowed": true,
+        "rule_id": "allow:wallet_balance",
+        "reason": "read-only balance checks"
+      }
+    ],
     "decisions": [
       {
         "allowed": true,
         "rule_id": "allow:paper_trading",
         "reason": "read-only metrics for POC"
       }
-    ]
+    ],
+    "violations": []
   },
   "costs": {
     "total_estimated_usd": 0.0,

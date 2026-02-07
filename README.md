@@ -89,7 +89,7 @@ This repo ships a Rust harness that exercises A2A handling and provenance
 logging with a typed JSON-RPC request and a deterministic tool call.
 
 ```bash
-cargo run --bin telemetry-harness -- \
+cargo run --bin telemetry_harness -- \
   --agent ./node_archives/minimal-policy-node \
   --provenance-out ./telemetry/provenance.jsonl \
   --snapshot-out ./telemetry/snapshot.json \
@@ -97,7 +97,20 @@ cargo run --bin telemetry-harness -- \
 ```
 
 The harness asserts that tool call provenance events were recorded and writes
-all provenance events to the JSONL file.
+all provenance events to the JSONL file. It also writes a snapshot that
+captures policy rules, per-tool policy decisions, policy violations (tool calls
+that were denied by policy), and cost hints for Odos/The Graph/Wallet usage.
+Cost estimates are placeholders meant for relative comparisons only.
+
+To exercise a deny path (policy block), pass a message containing `deny`:
+
+```bash
+cargo run --bin telemetry_harness -- \
+  --agent ./node_archives/minimal-policy-node \
+  --provenance-out ./telemetry/provenance.jsonl \
+  --snapshot-out ./telemetry/snapshot.json \
+  --message "deny policy check"
+```
 
 ## Minimal Node Archive (Policy Explain POC)
 
@@ -112,6 +125,10 @@ node_archives/minimal-policy-node/
   src/index.ts
   dist/index.js
 ```
+
+`policy.json` is intentionally default-deny and includes an explicit deny rule
+for `odos_swap` to show the policy explain view; violations appear if a denied
+tool is invoked.
 
 ## A2A Flow (baml-ts-sandbox)
 

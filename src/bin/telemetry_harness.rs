@@ -191,8 +191,15 @@ const fn is_valid_tool_name(name: &str) -> bool {
 }
 
 const PAPER_TRADING_TOOL: &str = "paper_trading";
+const QUERY_SUBGRAPH_TOOL: &str = "query_subgraph";
+const ODOS_SWAP_TOOL: &str = "odos_swap";
+const WALLET_BALANCE_TOOL: &str = "wallet_balance";
 const _: () = {
-    if !is_valid_tool_name(PAPER_TRADING_TOOL) {
+    if !is_valid_tool_name(PAPER_TRADING_TOOL)
+        || !is_valid_tool_name(QUERY_SUBGRAPH_TOOL)
+        || !is_valid_tool_name(ODOS_SWAP_TOOL)
+        || !is_valid_tool_name(WALLET_BALANCE_TOOL)
+    {
         panic!("invalid tool name literal");
     }
 };
@@ -604,9 +611,27 @@ struct PolicyDecision {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct PolicyRuleSummary {
+    tool: ToolName,
+    allowed: bool,
+    rule_id: Option<String>,
+    reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PolicyViolation {
+    tool: ToolName,
+    calls: u64,
+    rule_id: Option<String>,
+    reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PolicySummary {
     mode: String,
+    rules: Vec<PolicyRuleSummary>,
     decisions: Vec<PolicyDecision>,
+    violations: Vec<PolicyViolation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -658,6 +683,35 @@ impl PolicyConfig {
             rule_id: None,
             reason: "denied by default policy".to_string(),
         })
+    }
+
+    fn rule_summaries(&self) -> Vec<PolicyRuleSummary> {
+        let mut rules = self
+            .rules
+            .iter()
+            .map(|(tool, decision)| PolicyRuleSummary {
+                tool: tool.clone(),
+                allowed: decision.allowed,
+                rule_id: decision.rule_id.clone(),
+                reason: decision.reason.clone(),
+            })
+            .collect::<Vec<_>>();
+        rules.sort_by(|a, b| a.tool.0.cmp(&b.tool.0));
+        rules
+    }
+}
+
+fn estimate_cost(tool: &ToolName, calls: u64) -> CostHint {
+    let per_call_usd = match tool.0.as_str() {
+        PAPER_TRADING_TOOL => 0.0,
+        QUERY_SUBGRAPH_TOOL => 0.0005,
+        ODOS_SWAP_TOOL => 0.001,
+        WALLET_BALANCE_TOOL => 0.0002,
+        _ => 0.0001,
+    };
+    CostHint {
+        estimated_usd: per_call_usd * calls as f64,
+        tokens: 0,
     }
 }
 
@@ -724,6 +778,8 @@ async fn write_snapshot(
     let mut total_duration: u64 = 0;
     let mut total_duration_count: u64 = 0;
     let mut policy_decisions = Vec::new();
+    let policy_rules = policy.rule_summaries();
+    let mut policy_violations = Vec::new();
     let mut cost_summary = CostSummary {
         total_estimated_usd: 0.0,
         total_tokens: 0,
@@ -758,11 +814,16 @@ async fn write_snapshot(
 
         let policy = policy.decision_for_tool(&tool);
         policy_decisions.push(policy.clone());
+        if !policy.allowed && calls > 0 {
+            policy_violations.push(PolicyViolation {
+                tool: tool.clone(),
+                calls,
+                rule_id: policy.rule_id.clone(),
+                reason: policy.reason.clone(),
+            });
+        }
 
-        let costs = CostHint {
-            estimated_usd: 0.0,
-            tokens: 0,
-        };
+        let costs = estimate_cost(&tool, calls);
         cost_summary.total_estimated_usd += costs.estimated_usd;
         cost_summary.total_tokens += costs.tokens;
 
@@ -806,7 +867,9 @@ async fn write_snapshot(
         totals,
         policy: PolicySummary {
             mode: policy.mode.clone(),
+            rules: policy_rules,
             decisions: policy_decisions,
+            violations: policy_violations,
         },
         costs: cost_summary,
     };
@@ -831,7 +894,7 @@ fn now_millis() -> u64 {
 }
 
 fn snapshot_schema_hash() -> String {
-    const SCHEMA: &str = "TelemetrySnapshot(v1):context_id,generated_at_ms,window_ms,tool_calls[tool,calls,successes,failures,avg_duration_ms,error_classes[class,count],success_rate,policy[allowed,rule_id,reason],costs[estimated_usd,tokens]],totals[tool_calls,tool_successes,tool_failures,avg_duration_ms],policy[mode,decisions],costs[total_estimated_usd,total_tokens]";
+    const SCHEMA: &str = "TelemetrySnapshot(v1):context_id,generated_at_ms,window_ms,tool_calls[tool,calls,successes,failures,avg_duration_ms,error_classes[class,count],success_rate,policy[allowed,rule_id,reason],costs[estimated_usd,tokens]],totals[tool_calls,tool_successes,tool_failures,avg_duration_ms],policy[mode,rules[tool,allowed,rule_id,reason],decisions[allowed,rule_id,reason],violations[tool,calls,rule_id,reason]],costs[total_estimated_usd,total_tokens]";
     blake3::hash(SCHEMA.as_bytes()).to_hex().to_string()
 }
 
@@ -879,6 +942,10 @@ async fn load_policy(agent_dir: &Path) -> Result<PolicyConfig, Box<dyn std::erro
     let mut rules = HashMap::new();
     for rule in parsed.rules {
         let Some(tool) = ToolName::new(&rule.tool) else {
+            tracing::warn!(
+                tool = %rule.tool,
+                "Invalid tool name in policy.json; skipping rule"
+            );
             continue;
         };
         rules.insert(
