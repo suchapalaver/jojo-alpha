@@ -90,7 +90,7 @@ logging with a typed JSON-RPC request and a deterministic tool call.
 
 ```bash
 cargo run --bin telemetry-harness -- \
-  --agent ./agent \
+  --agent ./node_archives/minimal-policy-node \
   --provenance-out ./telemetry/provenance.jsonl \
   --snapshot-out ./telemetry/snapshot.json \
   --message "telemetry harness ping"
@@ -98,6 +98,20 @@ cargo run --bin telemetry-harness -- \
 
 The harness asserts that tool call provenance events were recorded and writes
 all provenance events to the JSONL file.
+
+## Minimal Node Archive (Policy Explain POC)
+
+We include a minimal node archive that demonstrates policy explainability and
+provenance without real side effects:
+
+```
+node_archives/minimal-policy-node/
+  manifest.json
+  policy.json
+  baml_src/policy.baml
+  src/index.ts
+  dist/index.js
+```
 
 ## A2A Flow (baml-ts-sandbox)
 

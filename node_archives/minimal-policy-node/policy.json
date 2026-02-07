@@ -1,0 +1,11 @@
+{
+  "mode": "default-deny",
+  "rules": [
+    {
+      "tool": "paper_trading",
+      "allowed": true,
+      "rule_id": "allow:paper_trading",
+      "reason": "read-only metrics for POC"
+    }
+  ]
+}

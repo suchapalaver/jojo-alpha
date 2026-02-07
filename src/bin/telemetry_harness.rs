@@ -46,6 +46,20 @@ struct HarnessArgs {
     message: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct PolicyFile {
+    mode: String,
+    rules: Vec<PolicyRule>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PolicyRule {
+    tool: String,
+    allowed: bool,
+    rule_id: Option<String>,
+    reason: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 struct HarnessContextId(String);
 
@@ -252,6 +266,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args = HarnessArgs::parse();
     let (baml_src, js_path) = resolve_agent_paths(&args.agent)?;
+    let policy = load_policy(&args.agent).await.unwrap_or_else(|err| {
+        tracing::warn!(error = %err, "Failed to load policy.json; falling back to default policy");
+        PolicyConfig::default()
+    });
 
     let runtime = RuntimeBuilder::new()
         .with_schema_path(baml_src)
@@ -292,7 +310,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!(responses = %responses_json, "A2A response");
 
     let events = assert_provenance_events(&memory_store, &context_id.as_context_id()).await?;
-    write_snapshot(&args.snapshot_out, &events).await?;
+    write_snapshot(&args.snapshot_out, &events, &policy).await?;
 
     tracing::info!(
         provenance_out = %args.provenance_out.display(),
@@ -603,9 +621,50 @@ struct CostSummary {
     total_tokens: u64,
 }
 
+#[derive(Debug, Clone)]
+struct PolicyConfig {
+    mode: String,
+    rules: HashMap<ToolName, PolicyDecision>,
+}
+
+impl Default for PolicyConfig {
+    fn default() -> Self {
+        let mut rules = HashMap::new();
+        let Some(tool) = ToolName::new(PAPER_TRADING_TOOL) else {
+            return Self {
+                mode: "default-deny".to_string(),
+                rules,
+            };
+        };
+        rules.insert(
+            tool,
+            PolicyDecision {
+                allowed: true,
+                rule_id: Some(format!("allow:{}", PAPER_TRADING_TOOL)),
+                reason: "default harness allow".to_string(),
+            },
+        );
+        Self {
+            mode: "default-deny".to_string(),
+            rules,
+        }
+    }
+}
+
+impl PolicyConfig {
+    fn decision_for_tool(&self, tool: &ToolName) -> PolicyDecision {
+        self.rules.get(tool).cloned().unwrap_or(PolicyDecision {
+            allowed: false,
+            rule_id: None,
+            reason: "denied by default policy".to_string(),
+        })
+    }
+}
+
 async fn write_snapshot(
     path: &Path,
     events: &[baml_rt_provenance::ProvEvent],
+    policy: &PolicyConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use baml_rt_provenance::ProvEventData;
 
@@ -697,7 +756,7 @@ async fn write_snapshot(
             })
             .unwrap_or_default();
 
-        let policy = default_policy_for_tool(&tool);
+        let policy = policy.decision_for_tool(&tool);
         policy_decisions.push(policy.clone());
 
         let costs = CostHint {
@@ -746,7 +805,7 @@ async fn write_snapshot(
         tool_calls,
         totals,
         policy: PolicySummary {
-            mode: "default-deny".to_string(),
+            mode: policy.mode.clone(),
             decisions: policy_decisions,
         },
         costs: cost_summary,
@@ -809,12 +868,36 @@ fn classify_error(metadata: &serde_json::Value) -> ErrorClass {
     }
 }
 
-fn default_policy_for_tool(tool: &ToolName) -> PolicyDecision {
-    PolicyDecision {
-        allowed: true,
-        rule_id: Some(format!("allow:{}", tool.0)),
-        reason: "allowed by harness policy".to_string(),
+async fn load_policy(agent_dir: &Path) -> Result<PolicyConfig, Box<dyn std::error::Error>> {
+    let policy_path = agent_dir.join("policy.json");
+    if !policy_path.exists() {
+        return Ok(PolicyConfig::default());
     }
+    let contents = tokio::fs::read_to_string(&policy_path).await?;
+    let parsed: PolicyFile = serde_json::from_str(&contents)?;
+
+    let mut rules = HashMap::new();
+    for rule in parsed.rules {
+        let Some(tool) = ToolName::new(&rule.tool) else {
+            continue;
+        };
+        rules.insert(
+            tool,
+            PolicyDecision {
+                allowed: rule.allowed,
+                rule_id: rule.rule_id.clone(),
+                reason: rule
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| "policy rule".to_string()),
+            },
+        );
+    }
+
+    Ok(PolicyConfig {
+        mode: parsed.mode,
+        rules,
+    })
 }
 
 #[cfg(test)]
@@ -882,7 +965,8 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("snapshot.json");
 
-        write_snapshot(&path, &events)
+        let policy = PolicyConfig::default();
+        write_snapshot(&path, &events, &policy)
             .await
             .expect("write snapshot");
         let contents = fs::read_to_string(&path).await.expect("read snapshot");

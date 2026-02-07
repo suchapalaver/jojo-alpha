@@ -1,0 +1,6 @@
+{
+  "name": "minimal-policy-node",
+  "version": "0.1.0",
+  "description": "Minimal node archive demonstrating policy explainability and provenance",
+  "entry_point": "dist/index.js"
+}
