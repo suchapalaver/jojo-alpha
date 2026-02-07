@@ -13,6 +13,9 @@ path = "src/main.rs"
 # BAML Runtime (QuickJS sandbox for TypeScript agent execution)
 # NOTE: baml-rt now lives in the upstream workspace at crates/baml-rt.
 baml-rt = { path = "../baml-ts-sandbox/crates/baml-rt" }
+baml-rt-a2a = { path = "../baml-ts-sandbox/crates/baml-rt-a2a" }
+baml-rt-core = { path = "../baml-ts-sandbox/crates/baml-rt-core" }
+baml-rt-provenance = { path = "../baml-ts-sandbox/crates/baml-rt-provenance" }
 
 # DEX Aggregator
 odos-sdk = "2.0"

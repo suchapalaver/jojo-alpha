@@ -73,6 +73,21 @@ cargo run -- quote --input <token> --output <token> --amount <wei>
 | `BAML_QJS_GC_THRESHOLD` | Optional | GC threshold for QuickJS allocations |
 | `BAML_QJS_GC_INTERVAL_SECS` | Optional | Periodic full GC interval |
 
+## Telemetry Harness (A2A + Provenance)
+
+This repo ships a Rust harness that exercises A2A handling and provenance
+logging with a typed JSON-RPC request and a deterministic tool call.
+
+```bash
+cargo run --bin telemetry-harness -- \
+  --agent ./agent \
+  --provenance-out ./telemetry/provenance.jsonl \
+  --message "telemetry harness ping"
+```
+
+The harness asserts that tool call provenance events were recorded and writes
+all provenance events to the JSONL file.
+
 ### BAML Runtime Showcase (Upstream Features)
 
 This repo is meant to be a demo/template for the baml-ts-sandbox runtime. The upstream workspace ships a full toolchain and observability stack you can use alongside this project:
