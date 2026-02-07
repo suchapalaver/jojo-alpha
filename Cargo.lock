@@ -3448,6 +3448,7 @@ dependencies = [
  "baml-rt-a2a",
  "baml-rt-core",
  "baml-rt-provenance",
+ "blake3",
  "chrono",
  "clap",
  "dotenvy",

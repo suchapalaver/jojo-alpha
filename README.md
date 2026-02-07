@@ -82,6 +82,7 @@ logging with a typed JSON-RPC request and a deterministic tool call.
 cargo run --bin telemetry-harness -- \
   --agent ./agent \
   --provenance-out ./telemetry/provenance.jsonl \
+  --snapshot-out ./telemetry/snapshot.json \
   --message "telemetry harness ping"
 ```
 

@@ -31,6 +31,7 @@ alloy = { version = "1.4", features = ["full", "signer-local"] }
 tokio = { version = "1.0", features = ["full"] }
 async-trait = "0.1"
 futures = "0.3"
+blake3 = "1.5"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

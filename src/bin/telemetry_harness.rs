@@ -12,6 +12,8 @@ use baml_rt_a2a::A2aAgent;
 use baml_rt_core::ids::{ContextId, MessageId};
 use baml_rt_provenance::{InMemoryProvenanceStore, ProvEventType, ProvenanceWriter};
 use clap::Parser;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs::{create_dir_all, OpenOptions};
@@ -32,6 +34,10 @@ struct HarnessArgs {
     /// JSONL output file for provenance events
     #[arg(long, default_value = "./telemetry/provenance.jsonl")]
     provenance_out: PathBuf,
+
+    /// JSON output file for telemetry snapshot
+    #[arg(long, default_value = "./telemetry/snapshot.json")]
+    snapshot_out: PathBuf,
 
     /// Message text for the A2A request
     #[arg(long, default_value = "telemetry harness ping")]
@@ -70,7 +76,8 @@ impl ProvenanceWriter for JsonlProvenanceWriter {
         &self,
         event: baml_rt_provenance::ProvEvent,
     ) -> Result<(), baml_rt_provenance::ProvenanceError> {
-        let line = serde_json::to_string(&event)
+        let sanitized = sanitize_event(event);
+        let line = serde_json::to_string(&sanitized)
             .map_err(|e| baml_rt_provenance::ProvenanceError::Storage(e.to_string()))?;
         let mut file = self.file.lock().await;
         file.write_all(line.as_bytes())
@@ -144,10 +151,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let responses_json = serde_json::to_string(&responses)?;
     tracing::info!(responses = %responses_json, "A2A response");
 
-    assert_provenance_events(&memory_store, &context_id).await?;
+    let events = assert_provenance_events(&memory_store, &context_id).await?;
+    write_snapshot(&args.snapshot_out, &events).await?;
 
     tracing::info!(
         provenance_out = %args.provenance_out.display(),
+        snapshot_out = %args.snapshot_out.display(),
         "Telemetry harness completed"
     );
 
@@ -256,7 +265,7 @@ fn build_message_request(message: &str, context_id: ContextId) -> serde_json::Va
 async fn assert_provenance_events(
     store: &InMemoryProvenanceStore,
     context_id: &ContextId,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<Vec<baml_rt_provenance::ProvEvent>, Box<dyn std::error::Error>> {
     let events = store.events().await;
     let has_context = events.iter().any(|event| &event.context_id == context_id);
     if !has_context {
@@ -274,7 +283,7 @@ async fn assert_provenance_events(
         return Err("Expected tool call provenance events were not recorded".into());
     }
 
-    Ok(())
+    Ok(events)
 }
 
 fn quickjs_config_from_env() -> QuickJSConfig {
@@ -304,4 +313,178 @@ fn parse_u64_env(name: &str) -> Option<u64> {
         Ok(value) => value.parse::<u64>().ok(),
         Err(_) => None,
     }
+}
+
+fn sanitize_event(event: baml_rt_provenance::ProvEvent) -> baml_rt_provenance::ProvEvent {
+    use baml_rt_provenance::ProvEventData;
+
+    match event.data {
+        ProvEventData::ToolCall {
+            tool_name,
+            function_name,
+            args,
+            metadata,
+            duration_ms,
+            success,
+        } => {
+            let redacted = json!({
+                "redacted": true,
+                "hash": hash_json(&args),
+            });
+            baml_rt_provenance::ProvEvent {
+                data: ProvEventData::ToolCall {
+                    tool_name,
+                    function_name,
+                    args: redacted,
+                    metadata,
+                    duration_ms,
+                    success,
+                },
+                ..event
+            }
+        }
+        ProvEventData::LlmCall {
+            client,
+            model,
+            function_name,
+            prompt,
+            metadata,
+            duration_ms,
+            success,
+        } => {
+            let redacted = json!({
+                "redacted": true,
+                "hash": hash_json(&prompt),
+            });
+            baml_rt_provenance::ProvEvent {
+                data: ProvEventData::LlmCall {
+                    client,
+                    model,
+                    function_name,
+                    prompt: redacted,
+                    metadata,
+                    duration_ms,
+                    success,
+                },
+                ..event
+            }
+        }
+        _ => event,
+    }
+}
+
+fn hash_json(value: &serde_json::Value) -> String {
+    let bytes = serde_json::to_vec(value).unwrap_or_default();
+    blake3::hash(&bytes).to_hex().to_string()
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TelemetrySnapshot {
+    context_id: String,
+    tool_calls: Vec<ToolTelemetry>,
+    totals: TelemetryTotals,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ToolTelemetry {
+    tool: String,
+    calls: u64,
+    successes: u64,
+    failures: u64,
+    avg_duration_ms: Option<f64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TelemetryTotals {
+    tool_calls: u64,
+    tool_successes: u64,
+    tool_failures: u64,
+}
+
+async fn write_snapshot(
+    path: &Path,
+    events: &[baml_rt_provenance::ProvEvent],
+) -> Result<(), Box<dyn std::error::Error>> {
+    use baml_rt_provenance::ProvEventData;
+    use std::collections::HashMap;
+
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            create_dir_all(parent).await?;
+        }
+    }
+
+    let mut stats: HashMap<String, Vec<u64>> = HashMap::new();
+    let mut counts: HashMap<String, (u64, u64)> = HashMap::new();
+
+    for event in events {
+        if let ProvEventData::ToolCall {
+            tool_name,
+            duration_ms,
+            success,
+            ..
+        } = &event.data
+        {
+            let entry = counts.entry(tool_name.clone()).or_insert((0, 0));
+            if let Some(true) = success {
+                entry.0 += 1;
+            } else if let Some(false) = success {
+                entry.1 += 1;
+            }
+            if let Some(duration) = duration_ms {
+                stats.entry(tool_name.clone()).or_default().push(*duration);
+            }
+        }
+    }
+
+    let mut tool_calls = Vec::new();
+    let mut totals = TelemetryTotals {
+        tool_calls: 0,
+        tool_successes: 0,
+        tool_failures: 0,
+    };
+
+    for (tool, (successes, failures)) in counts {
+        let durations = stats.get(&tool).cloned().unwrap_or_default();
+        let avg = if durations.is_empty() {
+            None
+        } else {
+            let sum: u64 = durations.iter().sum();
+            Some(sum as f64 / durations.len() as f64)
+        };
+        let calls = successes + failures;
+        totals.tool_calls += calls;
+        totals.tool_successes += successes;
+        totals.tool_failures += failures;
+
+        tool_calls.push(ToolTelemetry {
+            tool,
+            calls,
+            successes,
+            failures,
+            avg_duration_ms: avg,
+        });
+    }
+
+    let context_id = events
+        .first()
+        .map(|event| event.context_id.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let snapshot = TelemetrySnapshot {
+        context_id,
+        tool_calls,
+        totals,
+    };
+
+    let contents = serde_json::to_vec_pretty(&snapshot)?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(path)
+        .await?;
+    file.write_all(&contents).await?;
+    file.write_all(b"\n").await?;
+    Ok(())
 }
