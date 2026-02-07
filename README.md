@@ -45,6 +45,16 @@ TypeScript Agent (QuickJS sandbox)
 
 This project depends on the upstream [baml-ts-sandbox](https://github.com/ryan-s-roberts/baml-ts-sandbox) workspace, which provides the `baml-rt` facade crate plus A2A, observability, provenance, and the agent builder/runner toolchain.
 
+### Local Checkout Required
+
+This repo uses **local path dependencies** to the baml-ts-sandbox workspace (required for the agent builder/runner and local BAML artifacts). Ensure you have a local checkout at:
+
+```
+../baml-ts-sandbox
+```
+
+We track the upstream workspace via the `suchapalaver/baml-ts-sandbox` fork; keep that local checkout on `main` to stay aligned.
+
 ## Quick Start
 
 ```bash
