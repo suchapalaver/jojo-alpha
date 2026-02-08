@@ -1132,10 +1132,36 @@ mod tests {
 
     #[test]
     fn cost_model_env_overrides() {
+        struct EnvGuard {
+            vars: Vec<&'static str>,
+        }
+
+        impl EnvGuard {
+            fn new(vars: Vec<&'static str>) -> Self {
+                Self { vars }
+            }
+        }
+
+        impl Drop for EnvGuard {
+            fn drop(&mut self) {
+                for var in &self.vars {
+                    std::env::remove_var(var);
+                }
+            }
+        }
+
+        let _guard = EnvGuard::new(vec![
+            "TELEMETRY_COST_ODOS_USD",
+            "TELEMETRY_COST_GRAPH_USD",
+            "TELEMETRY_COST_WALLET_USD",
+            "TELEMETRY_COST_PAPER_USD",
+            "TELEMETRY_COST_DEFAULT_USD",
+        ]);
+
         std::env::set_var("TELEMETRY_COST_ODOS_USD", "0.42");
         std::env::set_var("TELEMETRY_COST_GRAPH_USD", "-1.0");
-        std::env::set_var("TELEMETRY_COST_WALLET_USD", "nan");
-        std::env::set_var("TELEMETRY_COST_PAPER_USD", "0.0");
+        std::env::set_var("TELEMETRY_COST_WALLET_USD", "inf");
+        std::env::set_var("TELEMETRY_COST_PAPER_USD", "nan");
         std::env::set_var("TELEMETRY_COST_DEFAULT_USD", "0.01");
 
         let model = CostModel::from_env();
@@ -1150,11 +1176,5 @@ mod tests {
             model.wallet_usd_per_call,
             CostModel::default().wallet_usd_per_call
         );
-
-        std::env::remove_var("TELEMETRY_COST_ODOS_USD");
-        std::env::remove_var("TELEMETRY_COST_GRAPH_USD");
-        std::env::remove_var("TELEMETRY_COST_WALLET_USD");
-        std::env::remove_var("TELEMETRY_COST_PAPER_USD");
-        std::env::remove_var("TELEMETRY_COST_DEFAULT_USD");
     }
 }
