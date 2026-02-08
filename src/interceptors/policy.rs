@@ -164,6 +164,10 @@ fn is_valid_tool_name(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use baml_rt::generate_context_id;
+    use serde_json::json;
+    use tempfile::tempdir;
+    use tokio::fs;
 
     #[test]
     fn default_allow_policy_allows_unknown_tools() {
@@ -207,5 +211,50 @@ mod tests {
         assert!(!is_valid_tool_name("odos-swap"));
         assert!(!is_valid_tool_name("Odos"));
         assert!(!is_valid_tool_name(""));
+    }
+
+    #[tokio::test]
+    async fn policy_interceptor_blocks_denied_tool() {
+        let dir = tempdir().expect("tempdir");
+        let policy_path = dir.path().join("policy.json");
+        let policy = r#"
+        {
+          "mode": "default-deny",
+          "rules": [
+            {
+              "tool": "odos_swap",
+              "allowed": false,
+              "rule_id": "deny:odos_swap",
+              "reason": "execution disabled"
+            }
+          ]
+        }
+        "#;
+        fs::write(&policy_path, policy).await.expect("write policy");
+
+        let config = PolicyConfig::load_from_dir(dir.path())
+            .await
+            .expect("load policy");
+        let interceptor = PolicyInterceptor::new(config);
+
+        let context = ToolCallContext {
+            tool_name: "odos_swap".to_string(),
+            function_name: None,
+            args: json!({ "action": "quote" }),
+            context_id: generate_context_id(),
+            metadata: json!({}),
+        };
+
+        let decision = interceptor
+            .intercept_tool_call(&context)
+            .await
+            .expect("intercept");
+        match decision {
+            InterceptorDecision::Block(reason) => {
+                assert!(reason.contains("Policy denied tool odos_swap"));
+                assert!(reason.contains("deny:odos_swap"));
+            }
+            _ => panic!("expected policy to block"),
+        }
     }
 }
