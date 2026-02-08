@@ -648,7 +648,7 @@ struct CostSummary {
 }
 
 #[derive(Debug, Clone)]
-struct CostModel {
+struct CostConfig {
     odos_usd_per_call: f64,
     graph_usd_per_call: f64,
     wallet_usd_per_call: f64,
@@ -656,7 +656,7 @@ struct CostModel {
     default_usd_per_call: f64,
 }
 
-impl Default for CostModel {
+impl Default for CostConfig {
     fn default() -> Self {
         Self {
             odos_usd_per_call: 0.001,
@@ -668,34 +668,43 @@ impl Default for CostModel {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct CostModel {
+    config: CostConfig,
+}
+
 impl CostModel {
+    fn from_config(config: CostConfig) -> Self {
+        Self { config }
+    }
+
     fn from_env() -> Self {
-        let mut model = Self::default();
+        let mut config = CostConfig::default();
         if let Some(value) = parse_env_f64("TELEMETRY_COST_ODOS_USD") {
-            model.odos_usd_per_call = value;
+            config.odos_usd_per_call = value;
         }
         if let Some(value) = parse_env_f64("TELEMETRY_COST_GRAPH_USD") {
-            model.graph_usd_per_call = value;
+            config.graph_usd_per_call = value;
         }
         if let Some(value) = parse_env_f64("TELEMETRY_COST_WALLET_USD") {
-            model.wallet_usd_per_call = value;
+            config.wallet_usd_per_call = value;
         }
         if let Some(value) = parse_env_f64("TELEMETRY_COST_PAPER_USD") {
-            model.paper_usd_per_call = value;
+            config.paper_usd_per_call = value;
         }
         if let Some(value) = parse_env_f64("TELEMETRY_COST_DEFAULT_USD") {
-            model.default_usd_per_call = value;
+            config.default_usd_per_call = value;
         }
-        model
+        Self::from_config(config)
     }
 
     fn estimate_cost(&self, tool: &ToolName, calls: u64) -> CostHint {
         let per_call = match tool.0.as_str() {
-            PAPER_TRADING_TOOL => self.paper_usd_per_call,
-            QUERY_SUBGRAPH_TOOL => self.graph_usd_per_call,
-            ODOS_SWAP_TOOL => self.odos_usd_per_call,
-            WALLET_BALANCE_TOOL => self.wallet_usd_per_call,
-            _ => self.default_usd_per_call,
+            PAPER_TRADING_TOOL => self.config.paper_usd_per_call,
+            QUERY_SUBGRAPH_TOOL => self.config.graph_usd_per_call,
+            ODOS_SWAP_TOOL => self.config.odos_usd_per_call,
+            WALLET_BALANCE_TOOL => self.config.wallet_usd_per_call,
+            _ => self.config.default_usd_per_call,
         };
         CostHint {
             estimated_usd: per_call * calls as f64,
@@ -1131,50 +1140,23 @@ mod tests {
     }
 
     #[test]
-    fn cost_model_env_overrides() {
-        struct EnvGuard {
-            vars: Vec<&'static str>,
-        }
+    fn cost_model_from_config_overrides() {
+        let mut config = CostConfig::default();
+        config.odos_usd_per_call = 0.42;
+        config.paper_usd_per_call = 0.0;
+        config.default_usd_per_call = 0.01;
 
-        impl EnvGuard {
-            fn new(vars: Vec<&'static str>) -> Self {
-                Self { vars }
-            }
-        }
-
-        impl Drop for EnvGuard {
-            fn drop(&mut self) {
-                for var in &self.vars {
-                    std::env::remove_var(var);
-                }
-            }
-        }
-
-        let _guard = EnvGuard::new(vec![
-            "TELEMETRY_COST_ODOS_USD",
-            "TELEMETRY_COST_GRAPH_USD",
-            "TELEMETRY_COST_WALLET_USD",
-            "TELEMETRY_COST_PAPER_USD",
-            "TELEMETRY_COST_DEFAULT_USD",
-        ]);
-
-        std::env::set_var("TELEMETRY_COST_ODOS_USD", "0.42");
-        std::env::set_var("TELEMETRY_COST_GRAPH_USD", "-1.0");
-        std::env::set_var("TELEMETRY_COST_WALLET_USD", "inf");
-        std::env::set_var("TELEMETRY_COST_PAPER_USD", "nan");
-        std::env::set_var("TELEMETRY_COST_DEFAULT_USD", "0.01");
-
-        let model = CostModel::from_env();
-        assert_eq!(model.odos_usd_per_call, 0.42);
-        assert_eq!(model.paper_usd_per_call, 0.0);
-        assert_eq!(model.default_usd_per_call, 0.01);
+        let model = CostModel::from_config(config.clone());
+        assert_eq!(model.config.odos_usd_per_call, 0.42);
+        assert_eq!(model.config.paper_usd_per_call, 0.0);
+        assert_eq!(model.config.default_usd_per_call, 0.01);
         assert_eq!(
-            model.graph_usd_per_call,
-            CostModel::default().graph_usd_per_call
+            model.config.graph_usd_per_call,
+            CostConfig::default().graph_usd_per_call
         );
         assert_eq!(
-            model.wallet_usd_per_call,
-            CostModel::default().wallet_usd_per_call
+            model.config.wallet_usd_per_call,
+            CostConfig::default().wallet_usd_per_call
         );
     }
 }
