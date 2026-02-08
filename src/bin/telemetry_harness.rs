@@ -763,11 +763,11 @@ fn parse_env_f64(name: &str) -> Option<f64> {
     match std::env::var(name) {
         Ok(value) => match value.parse::<f64>() {
             Ok(parsed) => {
-                if parsed < 0.0 {
+                if parsed < 0.0 || !parsed.is_finite() {
                     tracing::warn!(
                         env_var = name,
                         value = parsed,
-                        "Negative cost override ignored"
+                        "Invalid cost override ignored"
                     );
                     None
                 } else {
@@ -1128,5 +1128,33 @@ mod tests {
     fn tool_name_literal_validates() {
         let tool = ToolName::from_literal(PAPER_TRADING_TOOL);
         assert_eq!(tool.0, PAPER_TRADING_TOOL);
+    }
+
+    #[test]
+    fn cost_model_env_overrides() {
+        std::env::set_var("TELEMETRY_COST_ODOS_USD", "0.42");
+        std::env::set_var("TELEMETRY_COST_GRAPH_USD", "-1.0");
+        std::env::set_var("TELEMETRY_COST_WALLET_USD", "nan");
+        std::env::set_var("TELEMETRY_COST_PAPER_USD", "0.0");
+        std::env::set_var("TELEMETRY_COST_DEFAULT_USD", "0.01");
+
+        let model = CostModel::from_env();
+        assert_eq!(model.odos_usd_per_call, 0.42);
+        assert_eq!(model.paper_usd_per_call, 0.0);
+        assert_eq!(model.default_usd_per_call, 0.01);
+        assert_eq!(
+            model.graph_usd_per_call,
+            CostModel::default().graph_usd_per_call
+        );
+        assert_eq!(
+            model.wallet_usd_per_call,
+            CostModel::default().wallet_usd_per_call
+        );
+
+        std::env::remove_var("TELEMETRY_COST_ODOS_USD");
+        std::env::remove_var("TELEMETRY_COST_GRAPH_USD");
+        std::env::remove_var("TELEMETRY_COST_WALLET_USD");
+        std::env::remove_var("TELEMETRY_COST_PAPER_USD");
+        std::env::remove_var("TELEMETRY_COST_DEFAULT_USD");
     }
 }
