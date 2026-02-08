@@ -1141,10 +1141,12 @@ mod tests {
 
     #[test]
     fn cost_model_from_config_overrides() {
-        let mut config = CostConfig::default();
-        config.odos_usd_per_call = 0.42;
-        config.paper_usd_per_call = 0.0;
-        config.default_usd_per_call = 0.01;
+        let config = CostConfig {
+            odos_usd_per_call: 0.42,
+            paper_usd_per_call: 0.0,
+            default_usd_per_call: 0.01,
+            ..Default::default()
+        };
 
         let model = CostModel::from_config(config.clone());
         assert_eq!(model.config.odos_usd_per_call, 0.42);

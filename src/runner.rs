@@ -3,9 +3,9 @@
 //! Loads and executes the trading agent in the QuickJS sandbox with
 //! full tool and interceptor support.
 
-use crate::config::{Config, GRAPH_API_KEY_ENV};
+use crate::config::{Config, PolicyDefaultMode, GRAPH_API_KEY_ENV};
 use crate::interceptors::{
-    AuditLogInterceptor, CooldownInterceptor, PolicyConfig, PolicyInterceptor,
+    AuditLogInterceptor, CooldownInterceptor, PolicyConfig, PolicyInterceptor, PolicyMode,
     SlippageGuardInterceptor, SpendLimitInterceptor,
 };
 use crate::paper_trading::PaperTradingState;
@@ -246,12 +246,34 @@ impl AgentRunner {
         let agent_root = baml_src
             .parent()
             .ok_or_else(|| crate::Error::Config("Missing agent directory".to_string()))?;
-        let policy = PolicyConfig::load_from_dir(agent_root)
-            .await
-            .unwrap_or_else(|err| {
-                warn!(error = %err, "Failed to load policy.json; defaulting to allow-all");
-                PolicyConfig::allow_all()
-            });
+        let policy_path = agent_root.join("policy.json");
+        let policy_settings = &self.config.policy;
+        let fallback_mode = match policy_settings.default_mode {
+            PolicyDefaultMode::AllowAll => PolicyMode::AllowAll,
+            PolicyDefaultMode::DefaultDeny => PolicyMode::DefaultDeny,
+        };
+
+        let policy = if !policy_path.exists() {
+            if policy_settings.require_file {
+                return Err(crate::Error::Config(format!(
+                    "policy.json required but missing at {}",
+                    policy_path.display()
+                )));
+            }
+            warn!(
+                policy_path = %policy_path.display(),
+                default_mode = ?policy_settings.default_mode,
+                "policy.json missing; falling back to default policy"
+            );
+            PolicyConfig::from_mode(fallback_mode)
+        } else {
+            PolicyConfig::load_from_dir(agent_root, fallback_mode)
+                .await
+                .unwrap_or_else(|err| {
+                    warn!(error = %err, "Failed to load policy.json; defaulting to fallback mode");
+                    PolicyConfig::from_mode(fallback_mode)
+                })
+        };
 
         let policy_interceptor = PolicyInterceptor::new(policy);
         builder = builder.with_tool_interceptor(policy_interceptor);

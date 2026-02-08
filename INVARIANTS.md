@@ -140,7 +140,7 @@ cannot be bypassed by downstream checks.
 |-------|-----------|
 | **Interceptor** | `PolicyInterceptor` loads `policy.json` and blocks denied tools |
 | **Explainability** | Block reason includes policy rule id and reason when present |
-| **Fallback** | Missing `policy.json` defaults to allow-all for backward compatibility |
+| **Fallback** | Missing `policy.json` defaults to allow-all unless `policy.require_file` is enabled |
 | **Testing** | Unit tests cover allow/deny decisions and tool name validation |
 
 **Code Location:** `src/interceptors/policy.rs`

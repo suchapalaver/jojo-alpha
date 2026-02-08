@@ -11,6 +11,6 @@ mod spend_limit;
 
 pub use audit_log::AuditLogInterceptor;
 pub use cooldown::CooldownInterceptor;
-pub use policy::{PolicyConfig, PolicyInterceptor};
+pub use policy::{PolicyConfig, PolicyInterceptor, PolicyMode};
 pub use slippage_guard::SlippageGuardInterceptor;
 pub use spend_limit::SpendLimitInterceptor;

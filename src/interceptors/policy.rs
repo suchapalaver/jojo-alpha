@@ -8,7 +8,7 @@ use std::path::Path;
 use tracing::warn;
 
 #[derive(Debug, Clone, Copy)]
-enum PolicyMode {
+pub enum PolicyMode {
     AllowAll,
     DefaultDeny,
 }
@@ -27,17 +27,21 @@ pub struct PolicyConfig {
 }
 
 impl PolicyConfig {
-    pub fn allow_all() -> Self {
+    pub fn from_mode(mode: PolicyMode) -> Self {
         Self {
-            mode: PolicyMode::AllowAll,
+            mode,
             rules: HashMap::new(),
         }
     }
 
-    pub async fn load_from_dir(agent_dir: &Path) -> crate::Result<Self> {
+    pub fn allow_all() -> Self {
+        Self::from_mode(PolicyMode::AllowAll)
+    }
+
+    pub async fn load_from_dir(agent_dir: &Path, fallback_mode: PolicyMode) -> crate::Result<Self> {
         let policy_path = agent_dir.join("policy.json");
         if !policy_path.exists() {
-            return Ok(Self::allow_all());
+            return Ok(Self::from_mode(fallback_mode));
         }
 
         let contents = tokio::fs::read_to_string(&policy_path)
@@ -50,7 +54,7 @@ impl PolicyConfig {
             "allow-all" => PolicyMode::AllowAll,
             other => {
                 warn!(mode = other, "Unknown policy mode, defaulting to allow-all");
-                PolicyMode::AllowAll
+                fallback_mode
             }
         };
 
@@ -232,7 +236,7 @@ mod tests {
         "#;
         fs::write(&policy_path, policy).await.expect("write policy");
 
-        let config = PolicyConfig::load_from_dir(dir.path())
+        let config = PolicyConfig::load_from_dir(dir.path(), PolicyMode::AllowAll)
             .await
             .expect("load policy");
         let interceptor = PolicyInterceptor::new(config);

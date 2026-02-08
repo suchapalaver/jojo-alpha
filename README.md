@@ -135,6 +135,11 @@ node_archives/minimal-policy-node/
 for `odos_swap` to show the policy explain view; violations appear if a denied
 tool is invoked.
 
+Runtime policy defaults can be configured in the agent `Config`:
+- `policy.default_mode`: `allow_all` (default) or `default_deny`
+- `policy.require_file`: `false` (default). When `true`, missing `policy.json`
+  fails closed.
+
 ## A2A Flow (baml-ts-sandbox)
 
 ```text
