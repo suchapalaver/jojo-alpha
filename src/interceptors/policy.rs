@@ -217,6 +217,26 @@ mod tests {
         assert!(!is_valid_tool_name(""));
     }
 
+    #[test]
+    fn from_mode_default_deny_blocks_unknown_tools() {
+        let policy = PolicyConfig::from_mode(PolicyMode::DefaultDeny);
+        let decision = policy.decision_for_tool("unknown_tool");
+        assert!(!decision.allowed);
+    }
+
+    #[tokio::test]
+    async fn missing_policy_uses_fallback_mode() {
+        let dir = tempdir().expect("tempdir");
+        let config = PolicyConfig::load_from_dir(dir.path(), PolicyMode::DefaultDeny)
+            .await
+            .expect("load");
+        let decision = config.decision_for_tool("any_tool");
+        assert!(
+            !decision.allowed,
+            "should deny when fallback is DefaultDeny"
+        );
+    }
+
     #[tokio::test]
     async fn policy_interceptor_blocks_denied_tool() {
         let dir = tempdir().expect("tempdir");

@@ -232,3 +232,54 @@ impl Default for Config {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn policy_settings_deserialize_defaults() {
+        let value = serde_json::json!({
+            "networks": ["ethereum"],
+            "protocols": ["uniswap_v3"],
+            "subgraphs": { "endpoints": {} },
+            "risk": {
+                "max_trade_usd": 100.0,
+                "max_daily_usd": 500.0,
+                "max_slippage_percent": 1.0,
+                "cooldown_seconds": 300,
+                "spend_limit_mode": "fail_open"
+            },
+            "check_interval_ms": 60000,
+            "audit_log_path": "audit.jsonl"
+        });
+        let parsed: Config = serde_json::from_value(value).expect("parse config");
+        assert_eq!(parsed.policy.default_mode, PolicyDefaultMode::AllowAll);
+        assert!(!parsed.policy.require_file);
+    }
+
+    #[test]
+    fn policy_settings_deserialize_explicit() {
+        let value = serde_json::json!({
+            "networks": ["ethereum"],
+            "protocols": ["uniswap_v3"],
+            "subgraphs": { "endpoints": {} },
+            "risk": {
+                "max_trade_usd": 100.0,
+                "max_daily_usd": 500.0,
+                "max_slippage_percent": 1.0,
+                "cooldown_seconds": 300,
+                "spend_limit_mode": "fail_open"
+            },
+            "policy": {
+                "default_mode": "default_deny",
+                "require_file": true
+            },
+            "check_interval_ms": 60000,
+            "audit_log_path": "audit.jsonl"
+        });
+        let parsed: Config = serde_json::from_value(value).expect("parse config");
+        assert_eq!(parsed.policy.default_mode, PolicyDefaultMode::DefaultDeny);
+        assert!(parsed.policy.require_file);
+    }
+}

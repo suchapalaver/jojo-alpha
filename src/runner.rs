@@ -246,34 +246,14 @@ impl AgentRunner {
         let agent_root = baml_src
             .parent()
             .ok_or_else(|| crate::Error::Config("Missing agent directory".to_string()))?;
-        let policy_path = agent_root.join("policy.json");
         let policy_settings = &self.config.policy;
+        // Config uses a serde-friendly enum; runtime uses PolicyMode for enforcement.
         let fallback_mode = match policy_settings.default_mode {
             PolicyDefaultMode::AllowAll => PolicyMode::AllowAll,
             PolicyDefaultMode::DefaultDeny => PolicyMode::DefaultDeny,
         };
 
-        let policy = if !policy_path.exists() {
-            if policy_settings.require_file {
-                return Err(crate::Error::Config(format!(
-                    "policy.json required but missing at {}",
-                    policy_path.display()
-                )));
-            }
-            warn!(
-                policy_path = %policy_path.display(),
-                default_mode = ?policy_settings.default_mode,
-                "policy.json missing; falling back to default policy"
-            );
-            PolicyConfig::from_mode(fallback_mode)
-        } else {
-            PolicyConfig::load_from_dir(agent_root, fallback_mode)
-                .await
-                .unwrap_or_else(|err| {
-                    warn!(error = %err, "Failed to load policy.json; defaulting to fallback mode");
-                    PolicyConfig::from_mode(fallback_mode)
-                })
-        };
+        let policy = load_policy_config(agent_root, policy_settings, fallback_mode).await?;
 
         let policy_interceptor = PolicyInterceptor::new(policy);
         builder = builder.with_tool_interceptor(policy_interceptor);
@@ -529,5 +509,56 @@ impl AgentRunner {
             bridge_guard.poll_event_loop();
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
+    }
+}
+
+async fn load_policy_config(
+    agent_root: &Path,
+    policy_settings: &crate::config::PolicySettings,
+    fallback_mode: PolicyMode,
+) -> Result<PolicyConfig> {
+    let policy_path = agent_root.join("policy.json");
+    if !policy_path.exists() {
+        if policy_settings.require_file {
+            return Err(crate::Error::Config(format!(
+                "policy.json required but missing at {}",
+                policy_path.display()
+            )));
+        }
+        warn!(
+            policy_path = %policy_path.display(),
+            default_mode = ?policy_settings.default_mode,
+            "policy.json missing; falling back to default policy"
+        );
+        return Ok(PolicyConfig::from_mode(fallback_mode));
+    }
+
+    let policy = PolicyConfig::load_from_dir(agent_root, fallback_mode)
+        .await
+        .unwrap_or_else(|err| {
+            warn!(error = %err, "Failed to load policy.json; defaulting to fallback mode");
+            PolicyConfig::from_mode(fallback_mode)
+        });
+    Ok(policy)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{PolicyDefaultMode, PolicySettings};
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn require_policy_file_errors_when_missing() {
+        let dir = tempdir().expect("tempdir");
+        let settings = PolicySettings {
+            default_mode: PolicyDefaultMode::AllowAll,
+            require_file: true,
+        };
+        let err = load_policy_config(dir.path(), &settings, PolicyMode::AllowAll)
+            .await
+            .expect_err("expected error");
+        let msg = format!("{err}");
+        assert!(msg.contains("policy.json required"));
     }
 }
