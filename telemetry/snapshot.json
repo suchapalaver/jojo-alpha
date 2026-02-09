@@ -2,74 +2,122 @@
   "snapshot_version": "v1",
   "schema_hash": "e1c88934ea2a3f560c4ddca6a2bde8dacb5ac92a29f04f4e8fb47dcc12715b3a",
   "context_id": "ctx-telemetry-harness",
-  "generated_at_ms": 1770495662113,
-  "window_ms": 3,
+  "generated_at_ms": 1770656344206,
+  "window_ms": 7,
   "tool_calls": {
     "head": {
-      "tool": "paper_trading",
+      "tool": "wallet_sign_message",
       "calls": 2,
       "successes": 2,
       "failures": 0,
-      "avg_duration_ms": 0.0,
+      "avg_duration_ms": 1.0,
       "error_classes": [],
       "success_rate": 1.0,
       "policy": {
         "allowed": true,
-        "rule_id": "allow:paper_trading",
-        "reason": "read-only metrics for POC"
+        "rule_id": "allow:wallet_sign_message",
+        "reason": "explicit message signing allowed"
       },
       "costs": {
-        "estimated_usd": 0.0,
+        "estimated_usd": 0.0002,
         "tokens": 0
       }
     },
-    "tail": []
+    "tail": [
+      {
+        "tool": "wallet_derive_address",
+        "calls": 2,
+        "successes": 2,
+        "failures": 0,
+        "avg_duration_ms": 0.0,
+        "error_classes": [],
+        "success_rate": 1.0,
+        "policy": {
+          "allowed": true,
+          "rule_id": "allow:wallet_derive_address",
+          "reason": "read-only address derivation"
+        },
+        "costs": {
+          "estimated_usd": 0.0002,
+          "tokens": 0
+        }
+      },
+      {
+        "tool": "wallet_sign_tx",
+        "calls": 2,
+        "successes": 2,
+        "failures": 0,
+        "avg_duration_ms": 0.0,
+        "error_classes": [],
+        "success_rate": 1.0,
+        "policy": {
+          "allowed": false,
+          "rule_id": "deny:wallet_sign_tx",
+          "reason": "transaction signing disabled in demo"
+        },
+        "costs": {
+          "estimated_usd": 0.0002,
+          "tokens": 0
+        }
+      }
+    ]
   },
   "totals": {
-    "tool_calls": 2,
-    "tool_successes": 2,
+    "tool_calls": 6,
+    "tool_successes": 6,
     "tool_failures": 0,
-    "avg_duration_ms": 0.0
+    "avg_duration_ms": 0.3333333333333333
   },
   "policy": {
     "mode": "default-deny",
     "rules": [
       {
-        "tool": "odos_swap",
+        "tool": "wallet_derive_address",
+        "allowed": true,
+        "rule_id": "allow:wallet_derive_address",
+        "reason": "read-only address derivation"
+      },
+      {
+        "tool": "wallet_sign_message",
+        "allowed": true,
+        "rule_id": "allow:wallet_sign_message",
+        "reason": "explicit message signing allowed"
+      },
+      {
+        "tool": "wallet_sign_tx",
         "allowed": false,
-        "rule_id": "deny:odos_swap",
-        "reason": "swap execution disabled in demo"
-      },
-      {
-        "tool": "paper_trading",
-        "allowed": true,
-        "rule_id": "allow:paper_trading",
-        "reason": "read-only metrics for POC"
-      },
-      {
-        "tool": "query_subgraph",
-        "allowed": true,
-        "rule_id": "allow:query_subgraph",
-        "reason": "read-only market data"
-      },
-      {
-        "tool": "wallet_balance",
-        "allowed": true,
-        "rule_id": "allow:wallet_balance",
-        "reason": "read-only balance checks"
+        "rule_id": "deny:wallet_sign_tx",
+        "reason": "transaction signing disabled in demo"
       }
     ],
     "decisions": [
       {
         "allowed": true,
-        "rule_id": "allow:paper_trading",
-        "reason": "read-only metrics for POC"
+        "rule_id": "allow:wallet_sign_message",
+        "reason": "explicit message signing allowed"
+      },
+      {
+        "allowed": true,
+        "rule_id": "allow:wallet_derive_address",
+        "reason": "read-only address derivation"
+      },
+      {
+        "allowed": false,
+        "rule_id": "deny:wallet_sign_tx",
+        "reason": "transaction signing disabled in demo"
       }
     ],
-    "violations": []
+    "violations": [
+      {
+        "tool": "wallet_sign_tx",
+        "calls": 2,
+        "rule_id": "deny:wallet_sign_tx",
+        "reason": "transaction signing disabled in demo"
+      }
+    ]
   },
   "costs": {
-    "total_estimated_usd": 0.0,
+    "total_estimated_usd": 0.0006000000000000001,
     "total_tokens": 0
   }
 }

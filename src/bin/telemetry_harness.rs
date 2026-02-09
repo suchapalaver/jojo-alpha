@@ -3,6 +3,7 @@
 //! Builds a QuickJS runtime, registers tools, wires A2A handling, and emits
 //! provenance events to a JSONL file while asserting expected event types.
 
+use baml_rt::interceptor::{InterceptorDecision, ToolCallContext, ToolInterceptor};
 use baml_rt::tracing_setup;
 use baml_rt::{A2aRequestHandler, QuickJSConfig, RuntimeBuilder};
 use baml_rt_a2a::a2a_types::{
@@ -47,6 +48,10 @@ struct HarnessArgs {
     /// Message text for the A2A request
     #[arg(long, default_value = "telemetry harness ping")]
     message: String,
+
+    /// Use the agent's own handle_a2a_request (skip harness handler injection)
+    #[arg(long)]
+    use_agent_handler: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -287,6 +292,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_schema_path(baml_src)
         .with_quickjs(true)
         .with_quickjs_config(quickjs_config_from_env())
+        .with_tool_interceptor(HarnessPolicyInterceptor::new(policy.clone()))
         .build()
         .await?;
 
@@ -296,7 +302,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     register_tools(&runtime).await?;
     load_agent_code(&bridge, &js_path).await?;
-    register_a2a_handler(&bridge).await?;
+    if args.use_agent_handler {
+        tracing::info!("Using agent-defined handle_a2a_request (harness handler skipped)");
+    } else {
+        register_a2a_handler(&bridge).await?;
+    }
 
     let memory_store = Arc::new(InMemoryProvenanceStore::new());
     let file_writer = Arc::new(JsonlProvenanceWriter::new(&args.provenance_out).await?);
@@ -786,6 +796,55 @@ impl PolicyConfig {
             .collect::<Vec<_>>();
         rules.sort_by(|a, b| a.tool.0.cmp(&b.tool.0));
         rules
+    }
+}
+
+#[derive(Debug, Clone)]
+struct HarnessPolicyInterceptor {
+    policy: PolicyConfig,
+}
+
+impl HarnessPolicyInterceptor {
+    fn new(policy: PolicyConfig) -> Self {
+        Self { policy }
+    }
+}
+
+#[async_trait::async_trait]
+impl ToolInterceptor for HarnessPolicyInterceptor {
+    async fn intercept_tool_call(
+        &self,
+        context: &ToolCallContext,
+    ) -> baml_rt::error::Result<InterceptorDecision> {
+        let Some(tool) = ToolName::new(&context.tool_name) else {
+            return Ok(InterceptorDecision::Block(format!(
+                "Invalid tool name '{}' for policy enforcement",
+                context.tool_name
+            )));
+        };
+        let decision = self.policy.decision_for_tool(&tool);
+        if decision.allowed {
+            return Ok(InterceptorDecision::Allow);
+        }
+        let rule_id = decision
+            .rule_id
+            .as_ref()
+            .map(|id| format!(" rule_id={}", id))
+            .unwrap_or_default();
+        Ok(InterceptorDecision::Block(format!(
+            "Policy denied tool {}: {}{}",
+            context.tool_name, decision.reason, rule_id
+        )))
+    }
+
+    async fn on_tool_call_complete(
+        &self,
+        _context: &ToolCallContext,
+        _result: &std::result::Result<serde_json::Value, baml_rt::error::BamlRtError>,
+        _duration_ms: u64,
+    ) {
+        // No-op: completion logging is handled by provenance + snapshot pipelines.
+        // Note: blocked tool calls do not reach this callback.
     }
 }
 

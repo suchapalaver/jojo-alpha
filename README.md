@@ -146,21 +146,25 @@ tool is invoked.
 To run the demo via the telemetry harness (requires `PRIVATE_KEY`):
 
 ```bash
+ # Use the agent's handler so the signing ladder executes.
 PRIVATE_KEY=0x... cargo run --bin telemetry_harness -- \
   --agent ./node_archives/passkey-demo-node \
   --provenance-out ./telemetry/provenance.jsonl \
   --snapshot-out ./telemetry/snapshot.json \
-  --message "passkey demo"
+  --message "passkey demo" \
+  --use-agent-handler
 ```
 
 Trigger the deny path:
 
 ```bash
+ # Use the agent's handler so the signing ladder executes.
 PRIVATE_KEY=0x... cargo run --bin telemetry_harness -- \
   --agent ./node_archives/passkey-demo-node \
   --provenance-out ./telemetry/provenance.jsonl \
   --snapshot-out ./telemetry/snapshot.json \
-  --message "deny signing"
+  --message "deny signing" \
+  --use-agent-handler
 ```
 
 Runtime policy defaults can be configured in the agent `Config`:
