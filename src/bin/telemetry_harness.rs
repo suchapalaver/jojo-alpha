@@ -272,6 +272,8 @@ impl ProvenanceWriter for FanoutProvenanceWriter {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Load .env if present for local runs.
+    dotenvy::dotenv().ok();
     tracing_setup::init_tracing();
 
     let args = HarnessArgs::parse();
