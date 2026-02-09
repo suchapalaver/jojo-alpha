@@ -143,6 +143,8 @@ tool is invoked.
 - `wallet_sign_message` (policy-allowed)
 - `wallet_sign_tx` (policy-denied in the demo)
 
+Full walkthrough: `docs/passkey-demo.md`
+
 To run the demo via the telemetry harness (requires `PRIVATE_KEY`):
 
 ```bash
