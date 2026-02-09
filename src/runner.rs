@@ -17,11 +17,13 @@ use crate::wallet::SecureWallet;
 use crate::Result;
 use baml_rt::quickjs_bridge::QuickJSBridge;
 use baml_rt::{QuickJSConfig, Runtime, RuntimeBuilder};
+use baml_rt_core::ids::{AgentId, UuidId};
 use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 /// Agent runner that manages the trading agent lifecycle
 pub struct AgentRunner {
@@ -128,9 +130,7 @@ impl AgentRunner {
         let runtime = self.build_runtime(&baml_src).await?;
 
         // Get QuickJS bridge and register tools
-        let bridge = runtime
-            .quickjs_bridge()
-            .ok_or_else(|| crate::Error::BamlRuntime("QuickJS bridge not available".to_string()))?;
+        let bridge = runtime.quickjs_bridge();
 
         self.register_tools(&runtime, &bridge).await?;
 
@@ -235,9 +235,10 @@ impl AgentRunner {
             crate::Error::Config("BAML source path contains invalid UTF-8".to_string())
         })?;
 
+        let agent_id = AgentId::from_uuid(UuidId::new(Uuid::new_v4()));
         let mut builder = RuntimeBuilder::new()
             .with_schema_path(baml_src_str)
-            .with_quickjs(true)
+            .with_agent_id(agent_id)
             .with_quickjs_config(quickjs_config_from_env());
 
         // Add environment variables for LLM providers
@@ -329,9 +330,7 @@ impl AgentRunner {
         // This allows __tool_invoke to dispatch to these tools
         {
             let baml_manager = runtime.baml_manager();
-            let manager_guard = baml_manager.lock().await;
-            let tool_registry = manager_guard.tool_registry();
-            let mut registry_guard = tool_registry.lock().await;
+            let mut manager_guard = baml_manager.lock().await;
 
             // Register The Graph tool
             // Use gateway-enabled version if GRAPH_API_KEY is set (enables caching)
@@ -347,16 +346,19 @@ impl AgentRunner {
                     TheGraphTool::new()
                 }
             };
-            registry_guard.register(the_graph_tool).map_err(|e| {
-                crate::Error::BamlRuntime(format!("Failed to register TheGraphTool: {}", e))
-            })?;
+            manager_guard
+                .register_tool(the_graph_tool)
+                .await
+                .map_err(|e| {
+                    crate::Error::BamlRuntime(format!("Failed to register TheGraphTool: {}", e))
+                })?;
             info!("Registered TheGraphTool with BAML manager");
 
             // Register Odos tool
             let odos_tool = OdosTool::try_new(&wallet_address).map_err(|e| {
                 crate::Error::BamlRuntime(format!("Failed to create OdosTool: {}", e))
             })?;
-            registry_guard.register(odos_tool).map_err(|e| {
+            manager_guard.register_tool(odos_tool).await.map_err(|e| {
                 crate::Error::BamlRuntime(format!("Failed to register OdosTool: {}", e))
             })?;
             info!("Registered OdosTool with BAML manager");
@@ -365,31 +367,37 @@ impl AgentRunner {
             let wallet_tool = WalletTool::new(&wallet_address).map_err(|e| {
                 crate::Error::BamlRuntime(format!("Failed to create WalletTool: {}", e))
             })?;
-            registry_guard.register(wallet_tool).map_err(|e| {
-                crate::Error::BamlRuntime(format!("Failed to register WalletTool: {}", e))
-            })?;
+            manager_guard
+                .register_tool(wallet_tool)
+                .await
+                .map_err(|e| {
+                    crate::Error::BamlRuntime(format!("Failed to register WalletTool: {}", e))
+                })?;
             info!("Registered WalletTool with BAML manager");
 
             // Register signing ladder tools if wallet is available
             if let Some(wallet) = self.wallet.as_ref() {
-                registry_guard
-                    .register(WalletDeriveAddressTool::new(wallet.clone()))
+                manager_guard
+                    .register_tool(WalletDeriveAddressTool::new(wallet.clone()))
+                    .await
                     .map_err(|e| {
                         crate::Error::BamlRuntime(format!(
                             "Failed to register WalletDeriveAddressTool: {}",
                             e
                         ))
                     })?;
-                registry_guard
-                    .register(WalletSignMessageTool::new(wallet.clone()))
+                manager_guard
+                    .register_tool(WalletSignMessageTool::new(wallet.clone()))
+                    .await
                     .map_err(|e| {
                         crate::Error::BamlRuntime(format!(
                             "Failed to register WalletSignMessageTool: {}",
                             e
                         ))
                     })?;
-                registry_guard
-                    .register(WalletSignTxTool::new(wallet.clone()))
+                manager_guard
+                    .register_tool(WalletSignTxTool::new(wallet.clone()))
+                    .await
                     .map_err(|e| {
                         crate::Error::BamlRuntime(format!(
                             "Failed to register WalletSignTxTool: {}",
@@ -405,7 +413,7 @@ impl AgentRunner {
             if let Some(ref paper_state) = self.paper_trading {
                 if paper_state.is_enabled() {
                     let paper_tool = PaperTradingTool::new(paper_state.clone());
-                    registry_guard.register(paper_tool).map_err(|e| {
+                    manager_guard.register_tool(paper_tool).await.map_err(|e| {
                         crate::Error::BamlRuntime(format!(
                             "Failed to register PaperTradingTool: {}",
                             e
@@ -421,7 +429,7 @@ impl AgentRunner {
         // 2. The global `invokeTool` function (registered by QuickJS bridge) automatically
         //    dispatches to Rust tools via `__tool_invoke` when a tool name doesn't exist
         //    as a JavaScript function
-        // 3. The agent code calls invokeTool("query_subgraph", {...}) which correctly
+        // 3. The agent code calls invokeTool("defi/query_subgraph", {...}) which correctly
         //    routes to the registered TheGraphTool
         _ = bridge; // Silence unused variable warning
 
@@ -448,7 +456,7 @@ impl AgentRunner {
 
         // For TypeScript files, we need to transpile or use a compatible version
         // For now, assume the code is JavaScript or has been transpiled
-        let result = bridge_guard.evaluate(&code).await;
+        let result = bridge_guard.evaluate(None, &code).await;
 
         match result {
             Ok(_) => {
@@ -521,7 +529,7 @@ impl AgentRunner {
         );
 
         // Start the trading loop
-        let result = bridge_guard.evaluate(&js_code).await;
+        let result = bridge_guard.evaluate(None, &js_code).await;
 
         match result {
             Ok(value) => {
@@ -536,12 +544,10 @@ impl AgentRunner {
             }
         }
 
-        // Keep the process alive and explicitly poll the QuickJS event loop
-        // so timers/promises progress even without additional evaluate() calls.
+        // Keep the process alive (QuickJS promise polling happens during evaluate/invoke).
         info!("Agent running. Press Ctrl+C to stop.");
         loop {
-            bridge_guard.poll_event_loop();
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         }
     }
 }

@@ -1,6 +1,6 @@
 # RUNTIME_NOTES.md
 
-Focused notes for the baml-ts-sandbox (QuickJS) runtime and its integration.
+Focused notes for the agent-platform (QuickJS) runtime and its integration.
 
 ## QuickJS Async Reality
 

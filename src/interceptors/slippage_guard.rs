@@ -2,6 +2,7 @@
 //!
 //! Blocks trades that exceed the configured maximum slippage tolerance.
 
+use crate::tools::TOOL_ODOS_SWAP;
 use async_trait::async_trait;
 use baml_rt::error::Result;
 use baml_rt::interceptor::{InterceptorDecision, ToolCallContext, ToolInterceptor};
@@ -29,7 +30,7 @@ impl SlippageGuardInterceptor {
 impl ToolInterceptor for SlippageGuardInterceptor {
     async fn intercept_tool_call(&self, context: &ToolCallContext) -> Result<InterceptorDecision> {
         // Only intercept odos_swap tool
-        if context.tool_name != "odos_swap" {
+        if context.tool_name != TOOL_ODOS_SWAP {
             return Ok(InterceptorDecision::Allow);
         }
 
@@ -77,7 +78,7 @@ mod tests {
         let interceptor = SlippageGuardInterceptor::new(1.0);
 
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: TOOL_ODOS_SWAP.to_string(),
             function_name: None,
             args: json!({
                 "action": "prepare_swap",
@@ -96,7 +97,7 @@ mod tests {
         let interceptor = SlippageGuardInterceptor::new(1.0);
 
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: TOOL_ODOS_SWAP.to_string(),
             function_name: None,
             args: json!({
                 "action": "prepare_swap",

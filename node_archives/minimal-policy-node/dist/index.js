@@ -1,3 +1,28 @@
+
+// Host tool helper (agent-platform expects openToolSession for host tools)
+async function invokeHostTool(toolName, args) {
+  const token = globalThis.__baml_invocation_token;
+  if (!token) {
+    throw new Error("Missing invocation token");
+  }
+  const session = await globalThis.openToolSession(toolName, token);
+  await session.send(args ?? {});
+  let step = await session.continue();
+  while (step && step.status === "streaming") {
+    step = await session.continue();
+  }
+  await session.finish();
+  if (step && step.status === "done") {
+    return step.output;
+  }
+  if (step && step.status === "error") {
+    throw new Error((step.error && step.error.message) || "Tool error");
+  }
+  return step;
+}
+const invokeTool = invokeHostTool;
+ globalThis.invokeTool = invokeHostTool;
+
 // Minimal A2A handler for policy explainability demo.
 // Runs inside the QuickJS sandbox.
 
@@ -8,7 +33,7 @@ globalThis.handle_a2a_request = async function(request) {
   let deny_result = null;
   if (text.toLowerCase().includes("deny")) {
     try {
-      await globalThis.invokeTool("odos_swap", {
+      await globalThis.invokeTool("defi/odos_swap", {
         action: "quote",
         input_token: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
         output_token: "0x0000000000000000000000000000000000000000",
@@ -18,7 +43,7 @@ globalThis.handle_a2a_request = async function(request) {
       deny_result = { error: String(err) };
     }
   }
-  const metrics = await globalThis.invokeTool("paper_trading", {
+  const metrics = await globalThis.invokeTool("defi/paper_trading", {
     action: "get_metrics",
     error_class: "transient"
   });

@@ -1,3 +1,28 @@
+
+// Host tool helper (agent-platform expects openToolSession for host tools)
+async function invokeHostTool(toolName: string, args: any) {
+  const token = (globalThis as any).__baml_invocation_token;
+  if (!token) {
+    throw new Error("Missing invocation token");
+  }
+  const session = await (globalThis as any).openToolSession(toolName, token);
+  await session.send(args ?? {});
+  let step = await session.continue();
+  while (step && step.status === "streaming") {
+    step = await session.continue();
+  }
+  await session.finish();
+  if (step && step.status === "done") {
+    return step.output;
+  }
+  if (step && step.status === "error") {
+    throw new Error(step.error?.message || "Tool error");
+  }
+  return step;
+}
+const invokeTool = invokeHostTool;
+(globalThis as any).invokeTool = invokeHostTool;
+
 /**
  * DeFi Trading Agent
  *
@@ -187,7 +212,7 @@ async function executeQueryPlan(plan: QueryPlan): Promise<PoolData[]> {
   const pools: PoolData[] = [];
 
   try {
-    const result = await invokeTool("query_subgraph", {
+    const result = await invokeTool("defi/query_subgraph", {
       protocol: plan.target_protocols[0] || "uniswap_v3",
       network: plan.target_networks[0] || "ethereum",
       query_type: "query_plan",
@@ -393,7 +418,7 @@ async function gatherPoolData(config: TradingConfig): Promise<PoolData[]> {
   for (const network of config.networks) {
     for (const protocol of config.protocols) {
       try {
-        const result = await invokeTool("query_subgraph", {
+        const result = await invokeTool("defi/query_subgraph", {
           protocol,
           network,
           query_type: "top_pools",
@@ -462,7 +487,7 @@ async function getCurrentPositions(): Promise<Position[]> {
 
   try {
     // Query wallet balances for all common tokens on Ethereum
-    const result = await invokeTool("wallet_balance", {
+    const result = await invokeTool("defi/wallet_balance", {
       action: "all_balances",
       network: "ethereum",
     });
@@ -523,7 +548,7 @@ async function getTokenPrice(tokenAddress: string, network: string = "ethereum")
   }
 
   try {
-    const result = await invokeTool("odos_swap", {
+    const result = await invokeTool("defi/odos_swap", {
       action: "get_price",
       token: tokenAddress,
       network: network,
@@ -564,7 +589,7 @@ async function getTokenPrices(tokenAddresses: string[], network: string = "ether
   // Fetch missing prices
   if (tokensToFetch.length > 0) {
     try {
-      const result = await invokeTool("odos_swap", {
+      const result = await invokeTool("defi/odos_swap", {
         action: "get_prices",
         tokens: tokensToFetch,
         network: network,
@@ -695,7 +720,7 @@ async function getQuote(action: { input_token: string; output_token: string; amo
   // Convert USD amount to token amount (simplified - assumes USDC input)
   const amount_wei = Math.floor(action.amount_usd * 1e6).toString();
 
-  const result = await invokeTool("odos_swap", {
+  const result = await invokeTool("defi/odos_swap", {
     action: "quote",
     input_token: action.input_token,
     output_token: action.output_token,
@@ -729,7 +754,7 @@ async function analyzeTrade(quote: any, action: any): Promise<TradeAnalysis> {
 async function prepareSwap(action: any, quote: any) {
   const amount_wei = Math.floor(action.amount_usd * 1e6).toString();
 
-  const result = await invokeTool("odos_swap", {
+  const result = await invokeTool("defi/odos_swap", {
     action: "prepare_swap",
     input_token: action.input_token,
     output_token: action.output_token,

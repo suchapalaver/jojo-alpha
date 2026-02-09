@@ -12,12 +12,40 @@
 
 use crate::paper_trading::PaperTradingState;
 use crate::tokens::registry;
+use crate::tools::{AnyJson, DefiBundle};
 use alloy::primitives::{Address, U256};
 use async_trait::async_trait;
 use baml_rt::error::{BamlRtError, Result};
 use baml_rt::tools::BamlTool;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::str::FromStr;
+use ts_rs::TS;
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[ts(export)]
+#[serde(rename_all = "snake_case")]
+pub enum PaperTradingAction {
+    ExecuteSwap,
+    GetBalances,
+    GetMetrics,
+    GetTrades,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[ts(export)]
+pub struct PaperTradingInput {
+    pub action: PaperTradingAction,
+    pub input_token: Option<String>,
+    pub output_token: Option<String>,
+    pub input_amount: Option<String>,
+    pub expected_output: Option<String>,
+    pub input_price_usd: Option<f64>,
+    pub output_price_usd: Option<f64>,
+    pub chain_id: Option<u64>,
+    pub limit: Option<u64>,
+}
 
 /// Tool for paper trading operations
 pub struct PaperTradingTool {
@@ -228,7 +256,11 @@ fn format_units(value: U256, decimals: u32) -> String {
 
 #[async_trait]
 impl BamlTool for PaperTradingTool {
-    const NAME: &'static str = "paper_trading";
+    type Bundle = DefiBundle;
+    const LOCAL_NAME: &'static str = "paper_trading";
+    type OpenInput = ();
+    type Input = PaperTradingInput;
+    type Output = AnyJson;
 
     fn description(&self) -> &'static str {
         "Paper trading tool for simulated trading. Execute hypothetical swaps, \
@@ -236,69 +268,18 @@ impl BamlTool for PaperTradingTool {
          and no real transactions are submitted."
     }
 
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": ["execute_swap", "get_balances", "get_metrics", "get_trades"],
-                    "description": "Action to perform"
-                },
-                "input_token": {
-                    "type": "string",
-                    "description": "Input token address (for execute_swap)"
-                },
-                "output_token": {
-                    "type": "string",
-                    "description": "Output token address (for execute_swap)"
-                },
-                "input_amount": {
-                    "type": "string",
-                    "description": "Input amount in wei (for execute_swap)"
-                },
-                "expected_output": {
-                    "type": "string",
-                    "description": "Expected output amount in wei from quote (for execute_swap)"
-                },
-                "input_price_usd": {
-                    "type": "number",
-                    "description": "USD price of input token (for execute_swap)"
-                },
-                "output_price_usd": {
-                    "type": "number",
-                    "description": "USD price of output token (for execute_swap)"
-                },
-                "chain_id": {
-                    "type": "integer",
-                    "description": "Chain ID (default: 1 for Ethereum)",
-                    "default": 1
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Number of trades to return (for get_trades)"
-                }
-            },
-            "required": ["action"]
-        })
-    }
+    async fn execute(&self, args: Self::Input) -> Result<Self::Output> {
+        let args_value = serde_json::to_value(&args)
+            .map_err(|e| BamlRtError::InvalidArgument(format!("Invalid args: {}", e)))?;
 
-    async fn execute(&self, args: Value) -> Result<Value> {
-        let action = args
-            .get("action")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'action' field".to_string()))?;
+        let result = match args.action {
+            PaperTradingAction::ExecuteSwap => self.execute_swap(&args_value).await?,
+            PaperTradingAction::GetBalances => self.get_balances(&args_value).await?,
+            PaperTradingAction::GetMetrics => self.get_metrics().await?,
+            PaperTradingAction::GetTrades => self.get_trades(&args_value).await?,
+        };
 
-        match action {
-            "execute_swap" => self.execute_swap(&args).await,
-            "get_balances" => self.get_balances(&args).await,
-            "get_metrics" => self.get_metrics().await,
-            "get_trades" => self.get_trades(&args).await,
-            _ => Err(BamlRtError::InvalidArgument(format!(
-                "Unknown action: {}. Use 'execute_swap', 'get_balances', 'get_metrics', or 'get_trades'",
-                action
-            ))),
-        }
+        Ok(AnyJson::new(result))
     }
 }
 
@@ -317,7 +298,7 @@ mod tests {
         let state = PaperTradingState::new(&config);
         let tool = PaperTradingTool::new(state);
 
-        assert_eq!(PaperTradingTool::NAME, "paper_trading");
+        assert_eq!(PaperTradingTool::name(), "defi/paper_trading");
         assert!(tool.description().contains("Paper trading"));
     }
 
@@ -331,8 +312,18 @@ mod tests {
         let state = PaperTradingState::new(&config);
         let tool = PaperTradingTool::new(state);
 
-        let args = json!({ "action": "get_metrics" });
-        let result = tool.execute(args).await.unwrap();
+        let args = PaperTradingInput {
+            action: PaperTradingAction::GetMetrics,
+            input_token: None,
+            output_token: None,
+            input_amount: None,
+            expected_output: None,
+            input_price_usd: None,
+            output_price_usd: None,
+            chain_id: None,
+            limit: None,
+        };
+        let result = tool.execute(args).await.unwrap().0;
 
         assert_eq!(result["action"], "get_metrics");
         assert_eq!(result["initial_balance_usd"], 5000.0);
@@ -348,8 +339,18 @@ mod tests {
         let state = PaperTradingState::new(&config);
         let tool = PaperTradingTool::new(state);
 
-        let args = json!({ "action": "get_balances", "chain_id": 1 });
-        let result = tool.execute(args).await.unwrap();
+        let args = PaperTradingInput {
+            action: PaperTradingAction::GetBalances,
+            input_token: None,
+            output_token: None,
+            input_amount: None,
+            expected_output: None,
+            input_price_usd: None,
+            output_price_usd: None,
+            chain_id: Some(1),
+            limit: None,
+        };
+        let result = tool.execute(args).await.unwrap().0;
 
         assert_eq!(result["action"], "get_balances");
         assert!(result["balances"].is_array());

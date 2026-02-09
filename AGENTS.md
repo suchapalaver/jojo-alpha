@@ -97,7 +97,7 @@ When you add or modify non-deterministic behavior:
 - Assert ordering only when you explicitly sort results.
 - Record tool inputs/outputs for replayable failures.
 
-## BAML Runtime and QuickJS Sandbox (baml-ts-sandbox)
+## BAML Runtime and QuickJS Sandbox (agent-platform)
 
 This runtime is the heart of the agent. It is not just a bridge, it is a safety boundary.
 

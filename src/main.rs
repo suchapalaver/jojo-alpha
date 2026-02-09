@@ -188,7 +188,7 @@ async fn main() -> Result<()> {
             run_quote(input, output, amount, network).await?;
         }
         Commands::Config => {
-            println!("{}", serde_json::to_string_pretty(&config).unwrap());
+            print_pretty(&config)?;
         }
         Commands::Simulate {
             to,
@@ -262,6 +262,7 @@ async fn run_agent(
     if let Ok(private_key) = std::env::var("PRIVATE_KEY") {
         match SecureWallet::from_hex(&private_key) {
             Ok(wallet) => {
+                let wallet = wallet.with_dry_run(dry_run);
                 tracing::info!(address = %wallet.address(), "Loaded wallet from PRIVATE_KEY");
                 runner = runner.with_wallet(wallet);
             }
@@ -285,60 +286,97 @@ async fn run_query(
 ) -> Result<()> {
     use baml_rt::tools::BamlTool;
     use defi_trading_agent::config::GRAPH_API_KEY_ENV;
-    use defi_trading_agent::tools::TheGraphTool;
+    use defi_trading_agent::tools::{
+        GraphQueryInput, GraphQueryParams, GraphQueryType, TheGraphTool,
+    };
 
     // Use gateway-enabled tool if API key is available
     let tool = match std::env::var(GRAPH_API_KEY_ENV) {
         Ok(api_key) => TheGraphTool::with_gateway(api_key),
         Err(_) => TheGraphTool::new(),
     };
-    let params_value: serde_json::Value = params
-        .map(|p| serde_json::from_str(&p).unwrap_or(serde_json::json!({})))
-        .unwrap_or(serde_json::json!({}));
+    let params_value: serde_json::Value = match params {
+        Some(p) => serde_json::from_str(&p).map_err(|e| {
+            defi_trading_agent::Error::InvalidArgument(format!("Invalid --params JSON: {}", e))
+        })?,
+        None => serde_json::json!({}),
+    };
 
-    let args = serde_json::json!({
-        "protocol": protocol,
-        "network": network,
-        "query_type": query_type,
-        "params": params_value
-    });
+    let query_type = match query_type.as_str() {
+        "top_pools" => GraphQueryType::TopPools,
+        "pool_info" => GraphQueryType::PoolInfo,
+        "token_price" => GraphQueryType::TokenPrice,
+        "filtered_pools" => GraphQueryType::FilteredPools,
+        "query_plan" => GraphQueryType::QueryPlan,
+        other => {
+            return Err(defi_trading_agent::Error::Config(format!(
+                "Unknown query_type: {}",
+                other
+            )))
+        }
+    };
+
+    let params = if params_value.is_null()
+        || params_value
+            .as_object()
+            .map(|m| m.is_empty())
+            .unwrap_or(false)
+    {
+        None
+    } else {
+        Some(
+            serde_json::from_value::<GraphQueryParams>(params_value)
+                .map_err(|e| defi_trading_agent::Error::Config(format!("Invalid params: {}", e)))?,
+        )
+    };
+
+    let args = GraphQueryInput {
+        protocol,
+        network,
+        query_type,
+        params,
+    };
 
     let result = tool
         .execute(args)
         .await
         .map_err(|e| defi_trading_agent::Error::GraphQL(e.to_string()))?;
 
-    println!("{}", serde_json::to_string_pretty(&result).unwrap());
+    print_pretty(&result.0)?;
     Ok(())
 }
 
 async fn run_quote(input: String, output: String, amount: String, network: String) -> Result<()> {
     use baml_rt::tools::BamlTool;
-    use defi_trading_agent::tools::OdosTool;
+    use defi_trading_agent::tools::{OdosAction, OdosInput, OdosTool};
 
     // For quote, we don't need a real wallet address
     let tool = OdosTool::new("0x0000000000000000000000000000000000000000");
 
-    let args = serde_json::json!({
-        "action": "quote",
-        "input_token": input,
-        "output_token": output,
-        "amount": amount,
-        "network": network
-    });
+    let args = OdosInput {
+        action: OdosAction::Quote,
+        input_token: Some(input),
+        output_token: Some(output),
+        amount: Some(amount),
+        token: None,
+        tokens: None,
+        slippage_percent: None,
+        chain_id: None,
+        network: Some(network),
+    };
 
     let result = tool
         .execute(args)
         .await
         .map_err(|e| defi_trading_agent::Error::Odos(e.to_string()))?;
 
-    println!("{}", serde_json::to_string_pretty(&result).unwrap());
+    print_pretty(&result.0)?;
     Ok(())
 }
 
 async fn run_price(token: String, network: String) -> Result<()> {
     use baml_rt::tools::BamlTool;
-    use defi_trading_agent::tools::OdosTool;
+    use defi_trading_agent::tools::{OdosAction, OdosInput, OdosTool};
 
     // For price lookup, we don't need a real wallet address
     let tool = OdosTool::new("0x0000000000000000000000000000000000000000");
@@ -348,32 +386,44 @@ async fn run_price(token: String, network: String) -> Result<()> {
 
     if tokens.len() > 1 {
         // Batch price lookup
-        let args = serde_json::json!({
-            "action": "get_prices",
-            "tokens": tokens,
-            "network": network
-        });
+        let args = OdosInput {
+            action: OdosAction::GetPrices,
+            input_token: None,
+            output_token: None,
+            amount: None,
+            token: None,
+            tokens: Some(tokens.iter().map(|s| s.to_string()).collect()),
+            slippage_percent: None,
+            chain_id: None,
+            network: Some(network.clone()),
+        };
 
         let result = tool
             .execute(args)
             .await
             .map_err(|e| defi_trading_agent::Error::Odos(e.to_string()))?;
 
-        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        print_pretty(&result.0)?;
     } else {
         // Single token price
-        let args = serde_json::json!({
-            "action": "get_price",
-            "token": tokens[0],
-            "network": network
-        });
+        let args = OdosInput {
+            action: OdosAction::GetPrice,
+            input_token: None,
+            output_token: None,
+            amount: None,
+            token: Some(tokens[0].to_string()),
+            tokens: None,
+            slippage_percent: None,
+            chain_id: None,
+            network: Some(network),
+        };
 
         let result = tool
             .execute(args)
             .await
             .map_err(|e| defi_trading_agent::Error::Odos(e.to_string()))?;
 
-        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        print_pretty(&result.0)?;
     }
 
     Ok(())
@@ -441,5 +491,11 @@ async fn run_simulate(
         }
     }
 
+    Ok(())
+}
+
+fn print_pretty<T: serde::Serialize>(value: &T) -> Result<()> {
+    let rendered = serde_json::to_string_pretty(value).map_err(defi_trading_agent::Error::Json)?;
+    println!("{}", rendered);
     Ok(())
 }

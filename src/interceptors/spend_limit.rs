@@ -5,6 +5,7 @@
 
 use crate::config::SpendLimitMode;
 use crate::tokens;
+use crate::tools::TOOL_ODOS_SWAP;
 use alloy::primitives::Address;
 use async_trait::async_trait;
 use baml_rt::error::Result;
@@ -175,7 +176,7 @@ impl SpendLimitInterceptor {
 impl ToolInterceptor for SpendLimitInterceptor {
     async fn intercept_tool_call(&self, context: &ToolCallContext) -> Result<InterceptorDecision> {
         // Only intercept odos_swap tool
-        if context.tool_name != "odos_swap" {
+        if context.tool_name != TOOL_ODOS_SWAP {
             return Ok(InterceptorDecision::Allow);
         }
 
@@ -245,7 +246,7 @@ impl ToolInterceptor for SpendLimitInterceptor {
         _duration_ms: u64,
     ) {
         // Only track successful prepare_swap operations
-        if context.tool_name != "odos_swap" {
+        if context.tool_name != TOOL_ODOS_SWAP {
             return;
         }
 
@@ -280,7 +281,7 @@ mod tests {
         let interceptor = SpendLimitInterceptor::new(100.0, 500.0);
 
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: TOOL_ODOS_SWAP.to_string(),
             function_name: None,
             args: json!({
                 "action": "prepare_swap",
@@ -301,7 +302,7 @@ mod tests {
         let interceptor = SpendLimitInterceptor::new(100.0, 500.0);
 
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: TOOL_ODOS_SWAP.to_string(),
             function_name: None,
             args: json!({
                 "action": "prepare_swap",
@@ -321,7 +322,7 @@ mod tests {
         let interceptor = SpendLimitInterceptor::new(100.0, 500.0);
 
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: TOOL_ODOS_SWAP.to_string(),
             function_name: None,
             args: json!({
                 "action": "prepare_swap",
@@ -342,7 +343,7 @@ mod tests {
         let interceptor = SpendLimitInterceptor::new(100.0, 500.0);
 
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: TOOL_ODOS_SWAP.to_string(),
             function_name: None,
             args: json!({
                 "action": "prepare_swap",
@@ -362,7 +363,7 @@ mod tests {
         let interceptor = SpendLimitInterceptor::new(100.0, 500.0);
 
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: TOOL_ODOS_SWAP.to_string(),
             function_name: None,
             args: json!({
                 "action": "quote",
@@ -385,7 +386,7 @@ mod tests {
         let unknown_token = "0x1234567890123456789012345678901234567890";
 
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: TOOL_ODOS_SWAP.to_string(),
             function_name: None,
             args: json!({
                 "action": "prepare_swap",
@@ -408,7 +409,7 @@ mod tests {
         let unknown_token = "0x1234567890123456789012345678901234567890";
 
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: TOOL_ODOS_SWAP.to_string(),
             function_name: None,
             args: json!({
                 "action": "prepare_swap",
@@ -431,7 +432,7 @@ mod tests {
         let unknown_token = "0x1234567890123456789012345678901234567890";
 
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: TOOL_ODOS_SWAP.to_string(),
             function_name: None,
             args: json!({
                 "action": "prepare_swap",
@@ -453,7 +454,7 @@ mod tests {
         let interceptor = SpendLimitInterceptor::new(100.0, 500.0);
 
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: TOOL_ODOS_SWAP.to_string(),
             function_name: None,
             args: json!({
                 "action": "prepare_swap",
@@ -475,7 +476,7 @@ mod tests {
         let interceptor = SpendLimitInterceptor::new(100.0, 500.0);
 
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: TOOL_ODOS_SWAP.to_string(),
             function_name: None,
             args: json!({
                 "action": "prepare_swap",

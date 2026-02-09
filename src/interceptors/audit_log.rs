@@ -217,7 +217,7 @@ mod tests {
         let interceptor = AuditLogInterceptor::new(temp_file.path());
 
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: crate::tools::TOOL_ODOS_SWAP.to_string(),
             function_name: Some("trading_loop".to_string()),
             args: json!({
                 "action": "quote",
@@ -241,6 +241,6 @@ mod tests {
         let content = std::fs::read_to_string(temp_file.path()).unwrap();
         assert!(content.contains("tool_call_start"));
         assert!(content.contains("tool_call_complete"));
-        assert!(content.contains("odos_swap"));
+        assert!(content.contains(crate::tools::TOOL_ODOS_SWAP));
     }
 }

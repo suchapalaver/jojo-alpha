@@ -2,6 +2,7 @@
 
 use baml_rt::error::Result as BamlResult;
 use baml_rt::interceptor::{InterceptorDecision, ToolCallContext, ToolInterceptor};
+use baml_rt::tools::ToolName as RuntimeToolName;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -158,11 +159,7 @@ struct PolicyRule {
 }
 
 fn is_valid_tool_name(name: &str) -> bool {
-    if name.is_empty() {
-        return false;
-    }
-    name.bytes()
-        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == b'_')
+    RuntimeToolName::parse(name).is_ok()
 }
 
 #[cfg(test)]
@@ -176,7 +173,7 @@ mod tests {
     #[test]
     fn default_allow_policy_allows_unknown_tools() {
         let policy = PolicyConfig::allow_all();
-        let decision = policy.decision_for_tool("odos_swap");
+        let decision = policy.decision_for_tool(crate::tools::TOOL_ODOS_SWAP);
         assert!(decision.allowed);
     }
 
@@ -186,7 +183,7 @@ mod tests {
             mode: PolicyMode::DefaultDeny,
             rules: HashMap::new(),
         };
-        let decision = policy.decision_for_tool("odos_swap");
+        let decision = policy.decision_for_tool(crate::tools::TOOL_ODOS_SWAP);
         assert!(!decision.allowed);
     }
 
@@ -194,10 +191,10 @@ mod tests {
     fn rule_overrides_default_mode() {
         let mut rules = HashMap::new();
         rules.insert(
-            "odos_swap".to_string(),
+            crate::tools::TOOL_ODOS_SWAP.to_string(),
             PolicyDecision {
                 allowed: true,
-                rule_id: Some("allow:odos_swap".to_string()),
+                rule_id: Some(format!("allow:{}", crate::tools::TOOL_ODOS_SWAP)),
                 reason: "explicit allow".to_string(),
             },
         );
@@ -205,13 +202,13 @@ mod tests {
             mode: PolicyMode::DefaultDeny,
             rules,
         };
-        let decision = policy.decision_for_tool("odos_swap");
+        let decision = policy.decision_for_tool(crate::tools::TOOL_ODOS_SWAP);
         assert!(decision.allowed);
     }
 
     #[test]
     fn tool_name_validation_rejects_invalid() {
-        assert!(is_valid_tool_name("odos_swap"));
+        assert!(is_valid_tool_name(crate::tools::TOOL_ODOS_SWAP));
         assert!(!is_valid_tool_name("odos-swap"));
         assert!(!is_valid_tool_name("Odos"));
         assert!(!is_valid_tool_name(""));
@@ -246,9 +243,9 @@ mod tests {
           "mode": "default-deny",
           "rules": [
             {
-              "tool": "odos_swap",
+              "tool": "defi/odos_swap",
               "allowed": false,
-              "rule_id": "deny:odos_swap",
+              "rule_id": "deny:defi/odos_swap",
               "reason": "execution disabled"
             }
           ]
@@ -262,7 +259,7 @@ mod tests {
         let interceptor = PolicyInterceptor::new(config);
 
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: crate::tools::TOOL_ODOS_SWAP.to_string(),
             function_name: None,
             args: json!({ "action": "quote" }),
             context_id: generate_context_id(),
@@ -275,8 +272,8 @@ mod tests {
             .expect("intercept");
         match decision {
             InterceptorDecision::Block(reason) => {
-                assert!(reason.contains("Policy denied tool odos_swap"));
-                assert!(reason.contains("deny:odos_swap"));
+                assert!(reason.contains("Policy denied tool defi/odos_swap"));
+                assert!(reason.contains("deny:defi/odos_swap"));
             }
             _ => panic!("expected policy to block"),
         }

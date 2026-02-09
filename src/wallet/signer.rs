@@ -38,6 +38,8 @@ pub struct SecureWallet {
     address: Address,
     /// Ethereum wallet for alloy integration
     wallet: EthereumWallet,
+    /// Dry-run guard (defense-in-depth)
+    dry_run: bool,
 }
 
 impl SecureWallet {
@@ -79,6 +81,7 @@ impl SecureWallet {
             signer,
             address,
             wallet,
+            dry_run: false,
         })
     }
 
@@ -100,11 +103,23 @@ impl SecureWallet {
         &self.wallet
     }
 
+    /// Enable/disable dry-run guard for signing.
+    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
+
     /// Sign a message hash
     ///
     /// This is the ONLY way to use the private key.
     pub async fn sign_hash(&self, hash: &[u8; 32]) -> Result<alloy::signers::Signature> {
         use alloy::signers::SignerSync;
+
+        if self.dry_run {
+            return Err(Error::Wallet(
+                "Dry-run mode: signing disabled in SecureWallet".to_string(),
+            ));
+        }
 
         self.signer
             .sign_hash_sync(&alloy::primitives::B256::from(*hash))
@@ -117,6 +132,7 @@ impl std::fmt::Debug for SecureWallet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SecureWallet")
             .field("address", &self.address)
+            .field("dry_run", &self.dry_run)
             .field("signer", &"[REDACTED]")
             .finish()
     }

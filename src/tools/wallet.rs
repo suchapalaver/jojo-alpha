@@ -10,6 +10,7 @@
 
 use crate::config::RpcConfig;
 use crate::tokens::{self, TokenInfo};
+use crate::tools::{AnyJson, DefiBundle};
 use alloy::primitives::{Address, Bytes, U256};
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy::rpc::types::TransactionRequest;
@@ -17,9 +18,30 @@ use async_trait::async_trait;
 use baml_rt::error::{BamlRtError, Result};
 use baml_rt::tools::BamlTool;
 use futures::future::join_all;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::str::FromStr;
+use ts_rs::TS;
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[ts(export)]
+#[serde(rename_all = "snake_case")]
+pub enum WalletAction {
+    NativeBalance,
+    TokenBalance,
+    AllBalances,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[ts(export)]
+pub struct WalletInput {
+    pub action: WalletAction,
+    pub network: Option<String>,
+    pub chain_id: Option<u64>,
+    pub token_address: Option<String>,
+}
 
 /// Tool for querying wallet balances
 pub struct WalletTool {
@@ -271,7 +293,11 @@ fn format_units(value: U256, decimals: u32) -> String {
 
 #[async_trait]
 impl BamlTool for WalletTool {
-    const NAME: &'static str = "wallet_balance";
+    type Bundle = DefiBundle;
+    const LOCAL_NAME: &'static str = "wallet_balance";
+    type OpenInput = ();
+    type Input = WalletInput;
+    type Output = AnyJson;
 
     fn description(&self) -> &'static str {
         "Queries wallet balances for native ETH and ERC20 tokens. \
@@ -279,67 +305,30 @@ impl BamlTool for WalletTool {
          Read-only operation that never accesses private keys."
     }
 
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": ["native_balance", "token_balance", "all_balances"],
-                    "description": "Action to perform: 'native_balance' for ETH, 'token_balance' for specific ERC20, 'all_balances' for common tokens"
-                },
-                "network": {
-                    "type": "string",
-                    "enum": ["ethereum", "arbitrum", "optimism", "base"],
-                    "description": "Network to query"
-                },
-                "chain_id": {
-                    "type": "integer",
-                    "description": "Chain ID (alternative to network): 1=Ethereum, 42161=Arbitrum, 10=Optimism, 8453=Base"
-                },
-                "token_address": {
-                    "type": "string",
-                    "description": "ERC20 token address (required for 'token_balance' action)"
-                }
-            },
-            "required": ["action"]
-        })
-    }
-
-    async fn execute(&self, args: Value) -> Result<Value> {
-        let action = args
-            .get("action")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'action' field".to_string()))?;
-
+    async fn execute(&self, args: Self::Input) -> Result<Self::Output> {
         // Get chain_id from either chain_id or network
-        let chain_id = if let Some(id) = args.get("chain_id").and_then(|v| v.as_u64()) {
+        let chain_id = if let Some(id) = args.chain_id {
             id
-        } else if let Some(network) = args.get("network").and_then(|v| v.as_str()) {
+        } else if let Some(network) = args.network.as_deref() {
             Self::parse_chain_id(network)
         } else {
             1 // Default to Ethereum mainnet
         };
 
-        match action {
-            "native_balance" => self.get_native_balance(chain_id).await,
-            "token_balance" => {
-                let token_address = args
-                    .get("token_address")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        BamlRtError::InvalidArgument(
-                            "Missing 'token_address' for token_balance action".to_string(),
-                        )
-                    })?;
-                self.get_token_balance(chain_id, token_address).await
+        let result = match args.action {
+            WalletAction::NativeBalance => self.get_native_balance(chain_id).await?,
+            WalletAction::TokenBalance => {
+                let token_address = args.token_address.ok_or_else(|| {
+                    BamlRtError::InvalidArgument(
+                        "Missing 'token_address' for token_balance action".to_string(),
+                    )
+                })?;
+                self.get_token_balance(chain_id, &token_address).await?
             }
-            "all_balances" => self.get_all_balances(chain_id).await,
-            _ => Err(BamlRtError::InvalidArgument(format!(
-                "Unknown action: {}. Use 'native_balance', 'token_balance', or 'all_balances'",
-                action
-            ))),
-        }
+            WalletAction::AllBalances => self.get_all_balances(chain_id).await?,
+        };
+
+        Ok(AnyJson::new(result))
     }
 }
 

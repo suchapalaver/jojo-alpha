@@ -38,15 +38,15 @@ The passkey demo node calls the signing ladder tools. This is the agent’s code
   const ctx = request?.params?.message?.contextId || "ctx-missing";
   const text = request?.params?.message?.parts?.[0]?.text || "";
 
-  const address = await (globalThis as any).invokeTool("wallet_derive_address", {});
-  const signature = await (globalThis as any).invokeTool("wallet_sign_message", {
+  const address = await (globalThis as any).invokeTool("defi/wallet_derive_address", {});
+  const signature = await (globalThis as any).invokeTool("defi/wallet_sign_message", {
     message: `passkey-demo:${ctx}`
   });
 
   let deny_result: { error: string } | null = null;
   if (text.toLowerCase().includes("deny")) {
     try {
-      await (globalThis as any).invokeTool("wallet_sign_tx", {
+      await (globalThis as any).invokeTool("defi/wallet_sign_tx", {
         tx_hash: "0x" + "11".repeat(32)
       });
     } catch (err: any) {
@@ -85,21 +85,21 @@ The demo policy allows address derivation and message signing, but denies transa
   "mode": "default-deny",
   "rules": [
     {
-      "tool": "wallet_derive_address",
+      "tool": "defi/wallet_derive_address",
       "allowed": true,
-      "rule_id": "allow:wallet_derive_address",
+      "rule_id": "allow:defi/wallet_derive_address",
       "reason": "read-only address derivation"
     },
     {
-      "tool": "wallet_sign_message",
+      "tool": "defi/wallet_sign_message",
       "allowed": true,
-      "rule_id": "allow:wallet_sign_message",
+      "rule_id": "allow:defi/wallet_sign_message",
       "reason": "explicit message signing allowed"
     },
     {
-      "tool": "wallet_sign_tx",
+      "tool": "defi/wallet_sign_tx",
       "allowed": false,
-      "rule_id": "deny:wallet_sign_tx",
+      "rule_id": "deny:defi/wallet_sign_tx",
       "reason": "transaction signing disabled in demo"
     }
   ]
@@ -115,20 +115,16 @@ The signing tools are implemented in Rust and use `SecureWallet` for signing. Th
 ```rust
 // src/tools/wallet_signing.rs
 impl BamlTool for WalletDeriveAddressTool {
-    const NAME: &'static str = "wallet_derive_address";
+    type Bundle = DefiBundle;
+    const LOCAL_NAME: &'static str = "wallet_derive_address";
+    type OpenInput = ();
+    type Input = EmptyArgs;
+    type Output = AnyJson;
 
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false
-        })
-    }
-
-    async fn execute(&self, _args: Value) -> Result<Value> {
-        Ok(json!({
+    async fn execute(&self, _args: Self::Input) -> Result<Self::Output> {
+        Ok(AnyJson::new(json!({
             "address": self.wallet.address_string()
-        }))
+        })))
     }
 }
 ```
@@ -138,27 +134,14 @@ impl BamlTool for WalletDeriveAddressTool {
 ```rust
 // src/tools/wallet_signing.rs
 impl BamlTool for WalletSignMessageTool {
-    const NAME: &'static str = "wallet_sign_message";
+    type Bundle = DefiBundle;
+    const LOCAL_NAME: &'static str = "wallet_sign_message";
+    type OpenInput = ();
+    type Input = WalletSignMessageInput;
+    type Output = AnyJson;
 
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string",
-                    "description": "Message to sign (UTF-8)."
-                }
-            },
-            "required": ["message"],
-            "additionalProperties": false
-        })
-    }
-
-    async fn execute(&self, args: Value) -> Result<Value> {
-        let message = args
-            .get("message")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| BamlRtError::InvalidArgument("Missing message".to_string()))?;
+    async fn execute(&self, args: Self::Input) -> Result<Self::Output> {
+        let message = args.message;
 
         let hash = eip191_hash_message(message.as_bytes());
         let signature = self
@@ -167,11 +150,11 @@ impl BamlTool for WalletSignMessageTool {
             .await
             .map_err(|e| BamlRtError::ToolExecution(e.to_string()))?;
 
-        Ok(json!({
+        Ok(AnyJson::new(json!({
             "address": self.wallet.address_string(),
             "message_hash": signature_message_hash(hash),
             "signature": signature.to_string()
-        }))
+        })))
     }
 }
 ```
@@ -181,24 +164,13 @@ impl BamlTool for WalletSignMessageTool {
 ```rust
 // src/tools/wallet_signing.rs
 impl BamlTool for WalletSignTxTool {
-    const NAME: &'static str = "wallet_sign_tx";
+    type Bundle = DefiBundle;
+    const LOCAL_NAME: &'static str = "wallet_sign_tx";
+    type OpenInput = ();
+    type Input = WalletSignTxInput;
+    type Output = AnyJson;
 
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "tx_hash": { "type": "string" },
-                "tx_bytes": { "type": "string" }
-            },
-            "oneOf": [
-                {"required": ["tx_hash"]},
-                {"required": ["tx_bytes"]}
-            ],
-            "additionalProperties": false
-        })
-    }
-
-    async fn execute(&self, args: Value) -> Result<Value> {
+    async fn execute(&self, args: Self::Input) -> Result<Self::Output> {
         // Hash selection (tx_hash or keccak256(tx_bytes))
         // Sign using SecureWallet
         // Return address + hash + signature
@@ -270,8 +242,8 @@ RUST_LOG=info nix develop -c cargo run --bin telemetry_harness -- \
 
 - Allow path artifacts: `wallet_address`, `signed_message`
 - Deny path artifacts: `wallet_address`, `signed_message`, `policy_denied`
-- Provenance JSONL shows a blocked tool call for `wallet_sign_tx`
-- Snapshot shows `wallet_sign_tx` with failures and the deny rule
+- Provenance JSONL shows a blocked tool call for `defi/wallet_sign_tx`
+- Snapshot shows `defi/wallet_sign_tx` with failures and the deny rule
 
 ## Why This Demonstrates Passkey‑Like Signing
 

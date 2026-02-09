@@ -43,17 +43,17 @@ TypeScript Agent (QuickJS sandbox)
 
 ## Dependencies
 
-This project depends on the upstream [baml-ts-sandbox](https://github.com/ryan-s-roberts/baml-ts-sandbox) workspace, which provides the `baml-rt` facade crate plus A2A, observability, provenance, and the agent builder/runner toolchain.
+This project depends on the internal **agent-platform** workspace, which provides the `baml-rt` facade crate plus A2A, observability, provenance, and the agent builder/runner toolchain.
 
 ### Local Checkout Required
 
-This repo uses **local path dependencies** to the baml-ts-sandbox workspace (required for the agent builder/runner and local BAML artifacts). Ensure you have a local checkout at:
+This repo uses **local path dependencies** to the agent-platform workspace (required for the agent builder/runner and local BAML artifacts). Ensure you have a local checkout at:
 
 ```
-../baml-ts-sandbox
+../../semiotic-agentium/agent-platform
 ```
 
-We track the upstream workspace via the `suchapalaver/baml-ts-sandbox` fork; keep that local checkout on `main` to stay aligned.
+Keep that local checkout on `main` to stay aligned.
 
 ## Quick Start
 
@@ -132,16 +132,16 @@ node_archives/minimal-policy-node/
 ```
 
 `policy.json` is intentionally default-deny and includes an explicit deny rule
-for `odos_swap` to show the policy explain view; violations appear if a denied
+for `defi/odos_swap` to show the policy explain view; violations appear if a denied
 tool is invoked.
 
 ## Passkey Demo Node (Signing Ladder)
 
 `node_archives/passkey-demo-node` demonstrates a passkey-like signing ladder:
 
-- `wallet_derive_address` (read-only)
-- `wallet_sign_message` (policy-allowed)
-- `wallet_sign_tx` (policy-denied in the demo)
+- `defi/wallet_derive_address` (read-only)
+- `defi/wallet_sign_message` (policy-allowed)
+- `defi/wallet_sign_tx` (policy-denied in the demo)
 
 Full walkthrough: `docs/passkey-demo.md`
 
@@ -174,7 +174,7 @@ Runtime policy defaults can be configured in the agent `Config`:
 - `policy.require_file`: `false` (default). When `true`, missing `policy.json`
   fails closed.
 
-## A2A Flow (baml-ts-sandbox)
+## A2A Flow (agent-platform)
 
 ```text
 JSON-RPC request (message.send)
@@ -195,7 +195,7 @@ Minimal handler shape (inside the sandbox):
 ```js
 globalThis.handle_a2a_request = async function(request) {
   const ctx = request?.params?.message?.contextId || "ctx-missing";
-  const metrics = await invokeTool("paper_trading", { action: "get_metrics" });
+  const metrics = await invokeTool("defi/paper_trading", { action: "get_metrics" });
   return {
     task: {
       id: "task-telemetry",
@@ -229,7 +229,7 @@ Minimal A2A request shape (typed in Rust via `baml_rt_a2a::a2a_types`):
 
 ### BAML Runtime Showcase (Upstream Features)
 
-This repo is meant to be a demo/template for the baml-ts-sandbox runtime. The upstream workspace ships a full toolchain and observability stack you can use alongside this project:
+This repo is meant to be a demo/template for the agent-platform runtime. The workspace ships a full toolchain and observability stack you can use alongside this project:
 
 - **Agent builder**: lint, typegen, compile TS, and package agents.
 - **Agent runner**: load packaged agents and serve A2A requests.
@@ -241,7 +241,7 @@ Example (from the upstream repo checkout):
 
 ```bash
 # Build + package this agent
-cd ../baml-ts-sandbox
+cd ../../semiotic-agentium/agent-platform
 cargo run -p baml-rt-builder --bin baml-agent-builder -- \
   --agent-path ../defi-trading-agent/agent \
   --out ./agent.tar.gz

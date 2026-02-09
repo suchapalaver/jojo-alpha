@@ -9,13 +9,41 @@
 //! - The tool has no access to private keys
 
 use crate::tokens::{addresses, registry};
+use crate::tools::{AnyJson, DefiBundle};
 use alloy::primitives::{Address, U256};
 use async_trait::async_trait;
 use baml_rt::error::{BamlRtError, Result};
 use baml_rt::tools::BamlTool;
 use odos_sdk::{Chain, Slippage};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::str::FromStr;
+use ts_rs::TS;
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[ts(export)]
+#[serde(rename_all = "snake_case")]
+pub enum OdosAction {
+    Quote,
+    PrepareSwap,
+    GetPrice,
+    GetPrices,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[ts(export)]
+pub struct OdosInput {
+    pub action: OdosAction,
+    pub input_token: Option<String>,
+    pub output_token: Option<String>,
+    pub amount: Option<String>,
+    pub token: Option<String>,
+    pub tokens: Option<Vec<String>>,
+    pub slippage_percent: Option<f64>,
+    pub chain_id: Option<u64>,
+    pub network: Option<String>,
+}
 
 /// Tool for interacting with Odos DEX aggregator
 ///
@@ -401,7 +429,11 @@ impl OdosTool {
 
 #[async_trait]
 impl BamlTool for OdosTool {
-    const NAME: &'static str = "odos_swap";
+    type Bundle = DefiBundle;
+    const LOCAL_NAME: &'static str = "odos_swap";
+    type OpenInput = ();
+    type Input = OdosInput;
+    type Output = AnyJson;
 
     fn description(&self) -> &'static str {
         "Interacts with Odos DEX aggregator for optimal swap routing and real-time pricing. \
@@ -410,79 +442,24 @@ impl BamlTool for OdosTool {
          Supports Ethereum, Arbitrum, Optimism, and Base networks."
     }
 
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": ["quote", "prepare_swap", "get_price", "get_prices"],
-                    "description": "Action: 'quote' for swap quote, 'prepare_swap' for tx prep, 'get_price' for single token price, 'get_prices' for batch prices"
-                },
-                "input_token": {
-                    "type": "string",
-                    "description": "Input token address for quote/prepare_swap (use 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE for native ETH)"
-                },
-                "output_token": {
-                    "type": "string",
-                    "description": "Output token address for quote/prepare_swap"
-                },
-                "amount": {
-                    "type": "string",
-                    "description": "Input amount in wei (as string for precision) for quote/prepare_swap"
-                },
-                "token": {
-                    "type": "string",
-                    "description": "Token address for get_price action"
-                },
-                "tokens": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Array of token addresses for get_prices action"
-                },
-                "slippage_percent": {
-                    "type": "number",
-                    "description": "Maximum slippage tolerance (e.g., 0.5 for 0.5%)",
-                    "default": 0.5
-                },
-                "chain_id": {
-                    "type": "integer",
-                    "description": "Chain ID (1=Ethereum, 42161=Arbitrum, 10=Optimism, 8453=Base)",
-                    "default": 1
-                },
-                "network": {
-                    "type": "string",
-                    "enum": ["ethereum", "arbitrum", "optimism", "base"],
-                    "description": "Network name (alternative to chain_id)"
-                }
-            },
-            "required": ["action"]
-        })
-    }
-
-    async fn execute(&self, args: Value) -> Result<Value> {
-        let action = args
-            .get("action")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'action' field".to_string()))?;
-
-        // If network is provided instead of chain_id, convert it
-        let mut args = args.clone();
-        if let Some(network) = args.get("network").and_then(|v| v.as_str()) {
+    async fn execute(&self, args: Self::Input) -> Result<Self::Output> {
+        let mut args = args;
+        if let Some(network) = args.network.as_deref() {
             let chain_id = Self::parse_chain_id(network);
-            args["chain_id"] = json!(chain_id);
+            args.chain_id = Some(chain_id);
         }
 
-        match action {
-            "quote" => self.get_quote(&args).await,
-            "prepare_swap" => self.prepare_swap(&args).await,
-            "get_price" => self.get_price(&args).await,
-            "get_prices" => self.get_prices(&args).await,
-            _ => Err(BamlRtError::InvalidArgument(format!(
-                "Unknown action: {}. Use 'quote', 'prepare_swap', 'get_price', or 'get_prices'",
-                action
-            ))),
-        }
+        let args_value = serde_json::to_value(&args)
+            .map_err(|e| BamlRtError::InvalidArgument(format!("Invalid args: {}", e)))?;
+
+        let result = match args.action {
+            OdosAction::Quote => self.get_quote(&args_value).await?,
+            OdosAction::PrepareSwap => self.prepare_swap(&args_value).await?,
+            OdosAction::GetPrice => self.get_price(&args_value).await?,
+            OdosAction::GetPrices => self.get_prices(&args_value).await?,
+        };
+
+        Ok(AnyJson::new(result))
     }
 }
 

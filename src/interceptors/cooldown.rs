@@ -2,6 +2,7 @@
 //!
 //! Enforces a minimum time between trades to prevent rapid-fire trading.
 
+use crate::tools::TOOL_ODOS_SWAP;
 use async_trait::async_trait;
 use baml_rt::error::Result;
 use baml_rt::interceptor::{InterceptorDecision, ToolCallContext, ToolInterceptor};
@@ -35,7 +36,7 @@ impl CooldownInterceptor {
 impl ToolInterceptor for CooldownInterceptor {
     async fn intercept_tool_call(&self, context: &ToolCallContext) -> Result<InterceptorDecision> {
         // Only intercept odos_swap prepare_swap actions
-        if context.tool_name != "odos_swap" {
+        if context.tool_name != TOOL_ODOS_SWAP {
             return Ok(InterceptorDecision::Allow);
         }
 
@@ -72,7 +73,7 @@ impl ToolInterceptor for CooldownInterceptor {
         _duration_ms: u64,
     ) {
         // Update last trade time on successful prepare_swap
-        if context.tool_name != "odos_swap" {
+        if context.tool_name != TOOL_ODOS_SWAP {
             return;
         }
 
@@ -100,7 +101,7 @@ mod tests {
         let interceptor = CooldownInterceptor::new(60);
 
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: TOOL_ODOS_SWAP.to_string(),
             function_name: None,
             args: json!({
                 "action": "prepare_swap"
@@ -118,7 +119,7 @@ mod tests {
         let interceptor = CooldownInterceptor::new(60);
 
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: TOOL_ODOS_SWAP.to_string(),
             function_name: None,
             args: json!({
                 "action": "prepare_swap"
@@ -153,7 +154,7 @@ mod tests {
 
         // Quote should still be allowed
         let context = ToolCallContext {
-            tool_name: "odos_swap".to_string(),
+            tool_name: TOOL_ODOS_SWAP.to_string(),
             function_name: None,
             args: json!({
                 "action": "quote"

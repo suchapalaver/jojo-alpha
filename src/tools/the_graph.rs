@@ -15,17 +15,21 @@ use crate::config::{Network, Protocol, SubgraphEndpoints, SubgraphIds};
 use crate::tools::graph_gateway::{
     BasicGraphGateway, GatewayError, GraphGateway, QueryRoutingHints,
 };
+use crate::tools::{AnyJson, DefiBundle};
 use async_trait::async_trait;
 use baml_rt::error::{BamlRtError, Result};
 use baml_rt::tools::BamlTool;
 use reqwest::Client;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::sync::Arc;
+use ts_rs::TS;
 
 /// Query filters for intelligent data fetching (from InferQueryPlan)
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema, TS)]
+#[ts(export)]
 pub struct QueryFilters {
     #[serde(default)]
     pub min_tvl_usd: Option<f64>,
@@ -42,7 +46,8 @@ pub struct QueryFilters {
 }
 
 /// Query plan from inference strategist (InferQueryPlan)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[ts(export)]
 pub struct QueryPlan {
     pub target_networks: Vec<String>,
     pub target_protocols: Vec<String>,
@@ -59,6 +64,36 @@ pub struct TheGraphTool {
     endpoints: SubgraphEndpoints,
     /// Optional gateway for caching and x402 routing
     gateway: Option<Arc<dyn GraphGateway>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[ts(export)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphQueryType {
+    TopPools,
+    PoolInfo,
+    TokenPrice,
+    FilteredPools,
+    QueryPlan,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[ts(export)]
+pub struct GraphQueryParams {
+    pub limit: Option<u32>,
+    pub pool_id: Option<String>,
+    pub token_address: Option<String>,
+    pub filters: Option<QueryFilters>,
+    pub query_plan: Option<QueryPlan>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[ts(export)]
+pub struct GraphQueryInput {
+    pub protocol: String,
+    pub network: String,
+    pub query_type: GraphQueryType,
+    pub params: Option<GraphQueryParams>,
 }
 
 impl TheGraphTool {
@@ -673,103 +708,45 @@ impl Default for TheGraphTool {
 
 #[async_trait]
 impl BamlTool for TheGraphTool {
-    const NAME: &'static str = "query_subgraph";
+    type Bundle = DefiBundle;
+    const LOCAL_NAME: &'static str = "query_subgraph";
+    type OpenInput = ();
+    type Input = GraphQueryInput;
+    type Output = AnyJson;
 
     fn description(&self) -> &'static str {
         "Queries DeFi protocol subgraphs (Uniswap V3) for pool data, liquidity, \
          prices, and trading volumes. Supports Ethereum and Arbitrum networks."
     }
 
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "protocol": {
-                    "type": "string",
-                    "enum": ["uniswap_v3"],
-                    "description": "The DeFi protocol to query"
-                },
-                "network": {
-                    "type": "string",
-                    "enum": ["ethereum", "arbitrum", "optimism", "base"],
-                    "description": "The blockchain network"
-                },
-                "query_type": {
-                    "type": "string",
-                    "enum": ["top_pools", "pool_info", "token_price", "filtered_pools", "query_plan"],
-                    "description": "Type of data to retrieve. 'filtered_pools' applies filters to pool queries. 'query_plan' executes a full QueryPlan from InferQueryPlan."
-                },
-                "params": {
-                    "type": "object",
-                    "description": "Query-specific parameters",
-                    "properties": {
-                        "limit": {
-                            "type": "integer",
-                            "description": "Number of results for top_pools/filtered_pools (default: 10)"
-                        },
-                        "pool_id": {
-                            "type": "string",
-                            "description": "Pool address for pool_info query"
-                        },
-                        "token_address": {
-                            "type": "string",
-                            "description": "Token address for token_price query"
-                        },
-                        "filters": {
-                            "type": "object",
-                            "description": "Filters for filtered_pools query",
-                            "properties": {
-                                "min_tvl_usd": {"type": "number", "description": "Minimum TVL in USD"},
-                                "min_volume_tvl_ratio": {"type": "number", "description": "Minimum volume/TVL ratio"},
-                                "token_pairs": {"type": "array", "items": {"type": "string"}, "description": "Token pairs to include (e.g., ['WETH/USDC'])"},
-                                "exclude_tokens": {"type": "array", "items": {"type": "string"}, "description": "Token addresses to exclude"},
-                                "min_volume_24h_usd": {"type": "number", "description": "Minimum 24h volume in USD"},
-                                "fee_tiers": {"type": "array", "items": {"type": "integer"}, "description": "Fee tiers to include (e.g., [3000, 5000])"}
-                            }
-                        },
-                        "query_plan": {
-                            "type": "object",
-                            "description": "Full QueryPlan from InferQueryPlan (for query_plan query_type)",
-                            "properties": {
-                                "target_networks": {"type": "array", "items": {"type": "string"}},
-                                "target_protocols": {"type": "array", "items": {"type": "string"}},
-                                "data_filters": {"type": "object"},
-                                "query_priority": {"type": "integer"},
-                                "expected_data_points": {"type": "integer"}
-                            }
-                        }
-                    }
-                }
-            },
-            "required": ["protocol", "network", "query_type"]
-        })
-    }
+    async fn execute(&self, args: Self::Input) -> Result<Self::Output> {
+        let args_value = serde_json::to_value(&args)
+            .map_err(|e| BamlRtError::InvalidArgument(format!("Invalid args: {}", e)))?;
 
-    async fn execute(&self, args: Value) -> Result<Value> {
-        let protocol = args
+        let protocol = args_value
             .get("protocol")
             .and_then(|v| v.as_str())
             .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'protocol' field".to_string()))?;
 
-        let network_str = args
+        let network_str = args_value
             .get("network")
             .and_then(|v| v.as_str())
             .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'network' field".to_string()))?;
 
-        let query_type = args
+        let query_type = args_value
             .get("query_type")
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
                 BamlRtError::InvalidArgument("Missing 'query_type' field".to_string())
             })?;
 
-        let params = args.get("params").cloned().unwrap_or(json!({}));
+        let params = args_value.get("params").cloned().unwrap_or(json!({}));
         let network = Self::parse_network(network_str)?;
 
-        match (protocol, query_type) {
+        let result = match (protocol, query_type) {
             ("uniswap_v3", "top_pools") => {
                 let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
-                self.query_uniswap_top_pools(network, limit).await
+                self.query_uniswap_top_pools(network, limit).await?
             }
             ("uniswap_v3", "pool_info") => {
                 let pool_id = params
@@ -778,7 +755,7 @@ impl BamlTool for TheGraphTool {
                     .ok_or_else(|| {
                         BamlRtError::InvalidArgument("Missing 'pool_id' in params".to_string())
                     })?;
-                self.query_uniswap_pool(network, pool_id).await
+                self.query_uniswap_pool(network, pool_id).await?
             }
             ("uniswap_v3", "token_price") => {
                 let token_address = params
@@ -789,14 +766,14 @@ impl BamlTool for TheGraphTool {
                             "Missing 'token_address' in params".to_string(),
                         )
                     })?;
-                self.query_token_price(network, token_address).await
+                self.query_token_price(network, token_address).await?
             }
             ("uniswap_v3", "filtered_pools") => {
                 let filters_json = params.get("filters").cloned().unwrap_or(json!({}));
                 let filters: QueryFilters = serde_json::from_value(filters_json)
                     .map_err(|e| BamlRtError::InvalidArgument(format!("Invalid filters: {}", e)))?;
                 let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
-                self.query_filtered_pools(network, &filters, limit).await
+                self.query_filtered_pools(network, &filters, limit).await?
             }
             ("uniswap_v3", "query_plan") => {
                 let plan_json = params.get("query_plan").ok_or_else(|| {
@@ -805,13 +782,17 @@ impl BamlTool for TheGraphTool {
                 let plan: QueryPlan = serde_json::from_value(plan_json.clone()).map_err(|e| {
                     BamlRtError::InvalidArgument(format!("Invalid query plan: {}", e))
                 })?;
-                self.execute_query_plan(&plan).await
+                self.execute_query_plan(&plan).await?
             }
-            _ => Err(BamlRtError::InvalidArgument(format!(
-                "Unsupported query: {}/{}",
-                protocol, query_type
-            ))),
-        }
+            _ => {
+                return Err(BamlRtError::InvalidArgument(format!(
+                    "Unsupported query: {}/{}",
+                    protocol, query_type
+                )))
+            }
+        };
+
+        Ok(AnyJson::new(result))
     }
 }
 

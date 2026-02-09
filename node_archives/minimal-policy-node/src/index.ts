@@ -1,3 +1,28 @@
+
+// Host tool helper (agent-platform expects openToolSession for host tools)
+async function invokeHostTool(toolName: string, args: any) {
+  const token = (globalThis as any).__baml_invocation_token;
+  if (!token) {
+    throw new Error("Missing invocation token");
+  }
+  const session = await (globalThis as any).openToolSession(toolName, token);
+  await session.send(args ?? {});
+  let step = await session.continue();
+  while (step && step.status === "streaming") {
+    step = await session.continue();
+  }
+  await session.finish();
+  if (step && step.status === "done") {
+    return step.output;
+  }
+  if (step && step.status === "error") {
+    throw new Error(step.error?.message || "Tool error");
+  }
+  return step;
+}
+const invokeTool = invokeHostTool;
+(globalThis as any).invokeTool = invokeHostTool;
+
 // Minimal A2A handler for policy explainability demo.
 // Runs inside the QuickJS sandbox.
 
@@ -9,7 +34,7 @@
   let deny_result: { error: string } | null = null;
   if (text.toLowerCase().includes("deny")) {
     try {
-      await (globalThis as any).invokeTool("odos_swap", {
+      await (globalThis as any).invokeTool("defi/odos_swap", {
         action: "quote",
         input_token: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
         output_token: "0x0000000000000000000000000000000000000000",
@@ -19,7 +44,7 @@
       deny_result = { error: String(err) };
     }
   }
-  const metrics = await (globalThis as any).invokeTool("paper_trading", {
+  const metrics = await (globalThis as any).invokeTool("defi/paper_trading", {
     action: "get_metrics",
     error_class: "transient"
   });

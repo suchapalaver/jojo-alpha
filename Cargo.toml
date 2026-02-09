@@ -12,10 +12,11 @@ path = "src/main.rs"
 [dependencies]
 # BAML Runtime (QuickJS sandbox for TypeScript agent execution)
 # NOTE: baml-rt now lives in the upstream workspace at crates/baml-rt.
-baml-rt = { path = "../baml-ts-sandbox/crates/baml-rt" }
-baml-rt-a2a = { path = "../baml-ts-sandbox/crates/baml-rt-a2a" }
-baml-rt-core = { path = "../baml-ts-sandbox/crates/baml-rt-core" }
-baml-rt-provenance = { path = "../baml-ts-sandbox/crates/baml-rt-provenance" }
+baml-rt = { path = "../../semiotic-agentium/agent-platform/crates/baml-rt" }
+baml-rt-a2a = { path = "../../semiotic-agentium/agent-platform/crates/baml-rt-a2a" }
+baml-rt-core = { path = "../../semiotic-agentium/agent-platform/crates/baml-rt-core" }
+baml-rt-provenance = { path = "../../semiotic-agentium/agent-platform/crates/baml-rt-provenance" }
+baml-rt-tools = { path = "../../semiotic-agentium/agent-platform/crates/baml-rt-tools" }
 
 # DEX Aggregator
 odos-sdk = "2.0"
@@ -36,6 +37,9 @@ blake3 = "1.5"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# Tool schema + TS type generation for agent-platform BamlTool
+schemars = "1.1.0"
+ts-rs = "11.1.0"
 # Force js-sys version to align with baml-runtime constraints.
 js-sys = "=0.3.82"
 
@@ -50,6 +54,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 thiserror = "1.0"
 secrecy = { version = "0.10", features = ["serde"] }
 url = "2.5"
+uuid = { version = "1.10", features = ["v4"] }
 
 # Archive extraction
 flate2 = "1.0"
