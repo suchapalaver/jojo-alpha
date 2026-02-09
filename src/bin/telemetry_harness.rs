@@ -23,7 +23,10 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 
 use defi_trading_agent::paper_trading::{PaperModeConfig, PaperTradingState};
-use defi_trading_agent::tools::PaperTradingTool;
+use defi_trading_agent::tools::{
+    PaperTradingTool, WalletDeriveAddressTool, WalletSignMessageTool, WalletSignTxTool,
+};
+use defi_trading_agent::wallet::SecureWallet;
 
 #[derive(Parser, Debug)]
 #[command(name = "telemetry-harness")]
@@ -355,6 +358,22 @@ async fn register_tools(runtime: &baml_rt::Runtime) -> baml_rt::Result<()> {
     let mut registry_guard = registry.lock().await;
 
     registry_guard.register(PaperTradingTool::new(paper_state))?;
+
+    match SecureWallet::from_env("PRIVATE_KEY") {
+        Ok(wallet) => {
+            let wallet = Arc::new(wallet);
+            registry_guard.register(WalletDeriveAddressTool::new(wallet.clone()))?;
+            registry_guard.register(WalletSignMessageTool::new(wallet.clone()))?;
+            registry_guard.register(WalletSignTxTool::new(wallet))?;
+            tracing::info!("Registered wallet signing ladder tools for telemetry harness");
+        }
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                "PRIVATE_KEY not set; wallet signing tools not registered"
+            );
+        }
+    }
 
     Ok(())
 }

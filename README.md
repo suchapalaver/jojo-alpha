@@ -135,6 +135,34 @@ node_archives/minimal-policy-node/
 for `odos_swap` to show the policy explain view; violations appear if a denied
 tool is invoked.
 
+## Passkey Demo Node (Signing Ladder)
+
+`node_archives/passkey-demo-node` demonstrates a passkey-like signing ladder:
+
+- `wallet_derive_address` (read-only)
+- `wallet_sign_message` (policy-allowed)
+- `wallet_sign_tx` (policy-denied in the demo)
+
+To run the demo via the telemetry harness (requires `PRIVATE_KEY`):
+
+```bash
+PRIVATE_KEY=0x... cargo run --bin telemetry_harness -- \
+  --agent ./node_archives/passkey-demo-node \
+  --provenance-out ./telemetry/provenance.jsonl \
+  --snapshot-out ./telemetry/snapshot.json \
+  --message "passkey demo"
+```
+
+Trigger the deny path:
+
+```bash
+PRIVATE_KEY=0x... cargo run --bin telemetry_harness -- \
+  --agent ./node_archives/passkey-demo-node \
+  --provenance-out ./telemetry/provenance.jsonl \
+  --snapshot-out ./telemetry/snapshot.json \
+  --message "deny signing"
+```
+
 Runtime policy defaults can be configured in the agent `Config`:
 - `policy.default_mode`: `allow_all` (default) or `default_deny`
 - `policy.require_file`: `false` (default). When `true`, missing `policy.json`

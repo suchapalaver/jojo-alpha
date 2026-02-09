@@ -9,7 +9,10 @@ use crate::interceptors::{
     SlippageGuardInterceptor, SpendLimitInterceptor,
 };
 use crate::paper_trading::PaperTradingState;
-use crate::tools::{OdosTool, PaperTradingTool, TheGraphTool, WalletTool};
+use crate::tools::{
+    OdosTool, PaperTradingTool, TheGraphTool, WalletDeriveAddressTool, WalletSignMessageTool,
+    WalletSignTxTool, WalletTool,
+};
 use crate::wallet::SecureWallet;
 use crate::Result;
 use baml_rt::quickjs_bridge::QuickJSBridge;
@@ -24,7 +27,7 @@ use tracing::{error, info, warn};
 pub struct AgentRunner {
     config: Config,
     dry_run: bool,
-    wallet: Option<SecureWallet>,
+    wallet: Option<Arc<SecureWallet>>,
     paper_trading: Option<PaperTradingState>,
 }
 
@@ -87,7 +90,7 @@ impl AgentRunner {
 
     /// Set the wallet for transaction signing
     pub fn with_wallet(mut self, wallet: SecureWallet) -> Self {
-        self.wallet = Some(wallet);
+        self.wallet = Some(Arc::new(wallet));
         self
     }
 
@@ -366,6 +369,37 @@ impl AgentRunner {
                 crate::Error::BamlRuntime(format!("Failed to register WalletTool: {}", e))
             })?;
             info!("Registered WalletTool with BAML manager");
+
+            // Register signing ladder tools if wallet is available
+            if let Some(wallet) = self.wallet.as_ref() {
+                registry_guard
+                    .register(WalletDeriveAddressTool::new(wallet.clone()))
+                    .map_err(|e| {
+                        crate::Error::BamlRuntime(format!(
+                            "Failed to register WalletDeriveAddressTool: {}",
+                            e
+                        ))
+                    })?;
+                registry_guard
+                    .register(WalletSignMessageTool::new(wallet.clone()))
+                    .map_err(|e| {
+                        crate::Error::BamlRuntime(format!(
+                            "Failed to register WalletSignMessageTool: {}",
+                            e
+                        ))
+                    })?;
+                registry_guard
+                    .register(WalletSignTxTool::new(wallet.clone()))
+                    .map_err(|e| {
+                        crate::Error::BamlRuntime(format!(
+                            "Failed to register WalletSignTxTool: {}",
+                            e
+                        ))
+                    })?;
+                info!("Registered wallet signing ladder tools");
+            } else {
+                warn!("No wallet configured; signing tools not registered");
+            }
 
             // Register Paper Trading tool if enabled
             if let Some(ref paper_state) = self.paper_trading {
