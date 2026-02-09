@@ -545,6 +545,7 @@ impl AgentRunner {
         }
 
         // Keep the process alive (QuickJS promise polling happens during evaluate/invoke).
+        // 50ms is a low-CPU keep-alive; adjust if tighter JS timer latency is required.
         info!("Agent running. Press Ctrl+C to stop.");
         loop {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;

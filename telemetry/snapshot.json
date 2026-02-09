@@ -1,9 +1,9 @@
 {
   "snapshot_version": "v1",
   "schema_hash": "e1c88934ea2a3f560c4ddca6a2bde8dacb5ac92a29f04f4e8fb47dcc12715b3a",
-  "context_id": "ctx-1770670214331-1",
-  "generated_at_ms": 1770670215946,
-  "window_ms": 1613,
+  "context_id": "ctx-1770672203439-1",
+  "generated_at_ms": 1770672203503,
+  "window_ms": 59,
   "tool_calls": {
     "head": {
       "tool": "defi/wallet_sign_message",
@@ -29,7 +29,7 @@
         "calls": 2,
         "successes": 2,
         "failures": 0,
-        "avg_duration_ms": 0.0,
+        "avg_duration_ms": 0.5,
         "error_classes": [],
         "success_rate": 1.0,
         "policy": {
@@ -48,7 +48,7 @@
     "tool_calls": 4,
     "tool_successes": 4,
     "tool_failures": 0,
-    "avg_duration_ms": 0.25
+    "avg_duration_ms": 0.5
   },
   "policy": {
     "mode": "default-deny",

@@ -90,28 +90,25 @@ impl OdosTool {
     }
 
     /// Get a swap quote from Odos using the SwapBuilder API
-    async fn get_quote(&self, args: &Value) -> Result<Value> {
+    async fn get_quote(&self, args: &OdosInput) -> Result<Value> {
         let input_token = args
-            .get("input_token")
-            .and_then(|v| v.as_str())
+            .input_token
+            .as_deref()
             .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'input_token'".to_string()))?;
 
         let output_token = args
-            .get("output_token")
-            .and_then(|v| v.as_str())
+            .output_token
+            .as_deref()
             .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'output_token'".to_string()))?;
 
         let amount = args
-            .get("amount")
-            .and_then(|v| v.as_str())
+            .amount
+            .as_deref()
             .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'amount'".to_string()))?;
 
-        let chain_id = args.get("chain_id").and_then(|v| v.as_u64()).unwrap_or(1);
+        let chain_id = args.chain_id.unwrap_or(1);
 
-        let slippage_percent = args
-            .get("slippage_percent")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.5);
+        let slippage_percent = args.slippage_percent.unwrap_or(0.5);
 
         // Parse token addresses and amount
         let input_addr = Address::from_str(input_token).map_err(|e| {
@@ -158,28 +155,25 @@ impl OdosTool {
     }
 
     /// Prepare a swap transaction (does NOT sign or submit)
-    async fn prepare_swap(&self, args: &Value) -> Result<Value> {
+    async fn prepare_swap(&self, args: &OdosInput) -> Result<Value> {
         let input_token = args
-            .get("input_token")
-            .and_then(|v| v.as_str())
+            .input_token
+            .as_deref()
             .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'input_token'".to_string()))?;
 
         let output_token = args
-            .get("output_token")
-            .and_then(|v| v.as_str())
+            .output_token
+            .as_deref()
             .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'output_token'".to_string()))?;
 
         let amount = args
-            .get("amount")
-            .and_then(|v| v.as_str())
+            .amount
+            .as_deref()
             .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'amount'".to_string()))?;
 
-        let chain_id = args.get("chain_id").and_then(|v| v.as_u64()).unwrap_or(1);
+        let chain_id = args.chain_id.unwrap_or(1);
 
-        let slippage_percent = args
-            .get("slippage_percent")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.5);
+        let slippage_percent = args.slippage_percent.unwrap_or(0.5);
 
         // Parse token addresses and amount
         let input_addr = Address::from_str(input_token).map_err(|e| {
@@ -271,14 +265,17 @@ impl OdosTool {
     ///
     /// For stablecoins, returns $1 without making an API call.
     /// For other tokens, quotes 1 unit of the token to USDC.
-    async fn get_price(&self, args: &Value) -> Result<Value> {
+    async fn get_price(&self, args: &OdosInput) -> Result<Value> {
         let token = args
-            .get("token")
-            .and_then(|v| v.as_str())
+            .token
+            .as_deref()
             .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'token'".to_string()))?;
+        let chain_id = args.chain_id.unwrap_or(1);
 
-        let chain_id = args.get("chain_id").and_then(|v| v.as_u64()).unwrap_or(1);
+        self.get_price_for_token(token, chain_id).await
+    }
 
+    async fn get_price_for_token(&self, token: &str, chain_id: u64) -> Result<Value> {
         let token_addr = Address::from_str(token)
             .map_err(|e| BamlRtError::InvalidArgument(format!("Invalid token address: {}", e)))?;
 
@@ -353,26 +350,17 @@ impl OdosTool {
     }
 
     /// Get multiple token prices in a single call
-    async fn get_prices(&self, args: &Value) -> Result<Value> {
+    async fn get_prices(&self, args: &OdosInput) -> Result<Value> {
         let tokens = args
-            .get("tokens")
-            .and_then(|v| v.as_array())
+            .tokens
+            .as_ref()
             .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'tokens' array".to_string()))?;
 
-        let chain_id = args.get("chain_id").and_then(|v| v.as_u64()).unwrap_or(1);
+        let chain_id = args.chain_id.unwrap_or(1);
 
         let mut prices = Vec::new();
-        for token_val in tokens {
-            let token = token_val.as_str().ok_or_else(|| {
-                BamlRtError::InvalidArgument("Token must be a string".to_string())
-            })?;
-
-            let price_args = json!({
-                "token": token,
-                "chain_id": chain_id,
-            });
-
-            match self.get_price(&price_args).await {
+        for token in tokens {
+            match self.get_price_for_token(token, chain_id).await {
                 Ok(price_result) => prices.push(price_result),
                 Err(e) => {
                     // Include error but don't fail the whole batch
@@ -449,14 +437,11 @@ impl BamlTool for OdosTool {
             args.chain_id = Some(chain_id);
         }
 
-        let args_value = serde_json::to_value(&args)
-            .map_err(|e| BamlRtError::InvalidArgument(format!("Invalid args: {}", e)))?;
-
         let result = match args.action {
-            OdosAction::Quote => self.get_quote(&args_value).await?,
-            OdosAction::PrepareSwap => self.prepare_swap(&args_value).await?,
-            OdosAction::GetPrice => self.get_price(&args_value).await?,
-            OdosAction::GetPrices => self.get_prices(&args_value).await?,
+            OdosAction::Quote => self.get_quote(&args).await?,
+            OdosAction::PrepareSwap => self.prepare_swap(&args).await?,
+            OdosAction::GetPrice => self.get_price(&args).await?,
+            OdosAction::GetPrices => self.get_prices(&args).await?,
         };
 
         Ok(AnyJson::new(result))
@@ -535,15 +520,54 @@ mod tests {
         let schema = tool.input_schema();
 
         // Check that action enum includes price actions
-        let action_enum = &schema["properties"]["action"]["enum"];
-        assert!(action_enum
-            .as_array()
-            .unwrap()
-            .contains(&json!("get_price")));
-        assert!(action_enum
-            .as_array()
-            .unwrap()
-            .contains(&json!("get_prices")));
+        fn collect_actions(
+            schema_root: &serde_json::Value,
+            action_schema: &serde_json::Value,
+        ) -> Vec<String> {
+            let mut actions: Vec<String> = Vec::new();
+
+            if let Some(action_enum) = action_schema.get("enum").and_then(|v| v.as_array()) {
+                actions.extend(
+                    action_enum
+                        .iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string())),
+                );
+                return actions;
+            }
+
+            if let Some(one_of) = action_schema.get("oneOf").and_then(|v| v.as_array()) {
+                for entry in one_of {
+                    if let Some(value) = entry.get("const").and_then(|v| v.as_str()) {
+                        actions.push(value.to_string());
+                    } else if let Some(values) = entry.get("enum").and_then(|v| v.as_array()) {
+                        actions.extend(
+                            values
+                                .iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string())),
+                        );
+                    }
+                }
+                return actions;
+            }
+
+            if let Some(reference) = action_schema.get("$ref").and_then(|v| v.as_str()) {
+                if let Some(def_name) = reference.rsplit('/').next() {
+                    let defs = schema_root
+                        .get("$defs")
+                        .or_else(|| schema_root.get("definitions"));
+                    if let Some(def_schema) = defs.and_then(|d| d.get(def_name)) {
+                        return collect_actions(schema_root, def_schema);
+                    }
+                }
+            }
+
+            actions
+        }
+
+        let action_schema = &schema["properties"]["action"];
+        let actions = collect_actions(&schema, action_schema);
+        assert!(actions.iter().any(|v| v == "get_price"));
+        assert!(actions.iter().any(|v| v == "get_prices"));
 
         // Check that price-specific properties exist
         assert!(schema["properties"]["token"].is_object());

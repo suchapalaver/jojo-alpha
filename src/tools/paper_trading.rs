@@ -59,40 +59,36 @@ impl PaperTradingTool {
     }
 
     /// Execute a paper swap
-    async fn execute_swap(&self, args: &Value) -> Result<Value> {
+    async fn execute_swap(&self, args: &PaperTradingInput) -> Result<Value> {
         let input_token = args
-            .get("input_token")
-            .and_then(|v| v.as_str())
+            .input_token
+            .as_deref()
             .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'input_token'".to_string()))?;
 
         let output_token = args
-            .get("output_token")
-            .and_then(|v| v.as_str())
+            .output_token
+            .as_deref()
             .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'output_token'".to_string()))?;
 
         let input_amount = args
-            .get("input_amount")
-            .and_then(|v| v.as_str())
+            .input_amount
+            .as_deref()
             .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'input_amount'".to_string()))?;
 
         let expected_output = args
-            .get("expected_output")
-            .and_then(|v| v.as_str())
+            .expected_output
+            .as_deref()
             .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'expected_output'".to_string()))?;
 
         let input_price_usd = args
-            .get("input_price_usd")
-            .and_then(|v| v.as_f64())
+            .input_price_usd
             .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'input_price_usd'".to_string()))?;
 
-        let output_price_usd = args
-            .get("output_price_usd")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| {
-                BamlRtError::InvalidArgument("Missing 'output_price_usd'".to_string())
-            })?;
+        let output_price_usd = args.output_price_usd.ok_or_else(|| {
+            BamlRtError::InvalidArgument("Missing 'output_price_usd'".to_string())
+        })?;
 
-        let chain_id = args.get("chain_id").and_then(|v| v.as_u64()).unwrap_or(1);
+        let chain_id = args.chain_id.unwrap_or(1);
 
         // Parse addresses and amounts
         let input_addr = Address::from_str(input_token)
@@ -143,8 +139,8 @@ impl PaperTradingTool {
     }
 
     /// Get paper portfolio balances
-    async fn get_balances(&self, args: &Value) -> Result<Value> {
-        let chain_id = args.get("chain_id").and_then(|v| v.as_u64()).unwrap_or(1);
+    async fn get_balances(&self, args: &PaperTradingInput) -> Result<Value> {
+        let chain_id = args.chain_id.unwrap_or(1);
 
         let balances = self.state.get_all_balances().await;
 
@@ -201,11 +197,8 @@ impl PaperTradingTool {
     }
 
     /// Get recent trades
-    async fn get_trades(&self, args: &Value) -> Result<Value> {
-        let limit = args
-            .get("limit")
-            .and_then(|v| v.as_u64())
-            .map(|n| n as usize);
+    async fn get_trades(&self, args: &PaperTradingInput) -> Result<Value> {
+        let limit = args.limit.map(|n| n as usize);
         let trades = self.state.get_trades(limit).await;
 
         let formatted_trades: Vec<Value> = trades
@@ -269,14 +262,11 @@ impl BamlTool for PaperTradingTool {
     }
 
     async fn execute(&self, args: Self::Input) -> Result<Self::Output> {
-        let args_value = serde_json::to_value(&args)
-            .map_err(|e| BamlRtError::InvalidArgument(format!("Invalid args: {}", e)))?;
-
         let result = match args.action {
-            PaperTradingAction::ExecuteSwap => self.execute_swap(&args_value).await?,
-            PaperTradingAction::GetBalances => self.get_balances(&args_value).await?,
+            PaperTradingAction::ExecuteSwap => self.execute_swap(&args).await?,
+            PaperTradingAction::GetBalances => self.get_balances(&args).await?,
             PaperTradingAction::GetMetrics => self.get_metrics().await?,
-            PaperTradingAction::GetTrades => self.get_trades(&args_value).await?,
+            PaperTradingAction::GetTrades => self.get_trades(&args).await?,
         };
 
         Ok(AnyJson::new(result))

@@ -10,7 +10,7 @@ use alloy::primitives::{eip191_hash_message, hex, keccak256, B256};
 use async_trait::async_trait;
 use baml_rt::error::{BamlRtError, Result};
 use baml_rt::tools::BamlTool;
-use schemars::JsonSchema;
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -28,9 +28,29 @@ pub struct WalletSignMessageInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[ts(export)]
+#[schemars(schema_with = "wallet_sign_tx_schema")]
 pub struct WalletSignTxInput {
     pub tx_hash: Option<String>,
     pub tx_bytes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+struct WalletSignTxInputSchema {
+    pub tx_hash: Option<String>,
+    pub tx_bytes: Option<String>,
+}
+
+fn wallet_sign_tx_schema(gen: &mut SchemaGenerator) -> Schema {
+    let schema = WalletSignTxInputSchema::json_schema(gen);
+    let mut value: serde_json::Value = schema.into();
+    if let serde_json::Value::Object(ref mut map) = value {
+        map.insert(
+            "oneOf".to_string(),
+            json!([{"required": ["tx_hash"]}, {"required": ["tx_bytes"]}]),
+        );
+        return Schema::from(std::mem::take(map));
+    }
+    Schema::default()
 }
 
 fn b256_to_array(hash: B256) -> [u8; 32] {

@@ -1,5 +1,6 @@
 
-// Host tool helper (agent-platform expects openToolSession for host tools)
+// Host tool helper (agent-platform expects openToolSession for host tools).
+// Note: This helper is duplicated across agent entrypoints; keep in sync.
 async function invokeHostTool(toolName, args) {
   const token = globalThis.__baml_invocation_token;
   if (!token) {

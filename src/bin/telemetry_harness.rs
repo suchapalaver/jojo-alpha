@@ -495,6 +495,8 @@ async fn assert_provenance_events(
     }
     let has_context = events.iter().any(|event| event.context_id() == context_id);
     if !has_context {
+        // Context IDs can diverge depending on where the effect bus attaches scope.
+        // Warn, but continue so telemetry remains useful for demo/debug flows.
         let contexts: Vec<String> = events
             .iter()
             .map(|event| event.context_id().to_string())

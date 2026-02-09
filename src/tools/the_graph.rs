@@ -720,74 +720,46 @@ impl BamlTool for TheGraphTool {
     }
 
     async fn execute(&self, args: Self::Input) -> Result<Self::Output> {
-        let args_value = serde_json::to_value(&args)
-            .map_err(|e| BamlRtError::InvalidArgument(format!("Invalid args: {}", e)))?;
+        let network = Self::parse_network(&args.network)?;
+        let params = args.params.as_ref();
 
-        let protocol = args_value
-            .get("protocol")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'protocol' field".to_string()))?;
-
-        let network_str = args_value
-            .get("network")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| BamlRtError::InvalidArgument("Missing 'network' field".to_string()))?;
-
-        let query_type = args_value
-            .get("query_type")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                BamlRtError::InvalidArgument("Missing 'query_type' field".to_string())
-            })?;
-
-        let params = args_value.get("params").cloned().unwrap_or(json!({}));
-        let network = Self::parse_network(network_str)?;
-
-        let result = match (protocol, query_type) {
-            ("uniswap_v3", "top_pools") => {
-                let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
+        let result = match (args.protocol.as_str(), &args.query_type) {
+            ("uniswap_v3", GraphQueryType::TopPools) => {
+                let limit = params.and_then(|p| p.limit).unwrap_or(10);
                 self.query_uniswap_top_pools(network, limit).await?
             }
-            ("uniswap_v3", "pool_info") => {
-                let pool_id = params
-                    .get("pool_id")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        BamlRtError::InvalidArgument("Missing 'pool_id' in params".to_string())
-                    })?;
+            ("uniswap_v3", GraphQueryType::PoolInfo) => {
+                let pool_id = params.and_then(|p| p.pool_id.as_deref()).ok_or_else(|| {
+                    BamlRtError::InvalidArgument("Missing 'pool_id' in params".to_string())
+                })?;
                 self.query_uniswap_pool(network, pool_id).await?
             }
-            ("uniswap_v3", "token_price") => {
-                let token_address = params
-                    .get("token_address")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        BamlRtError::InvalidArgument(
-                            "Missing 'token_address' in params".to_string(),
-                        )
-                    })?;
+            ("uniswap_v3", GraphQueryType::TokenPrice) => {
+                let token_address =
+                    params
+                        .and_then(|p| p.token_address.as_deref())
+                        .ok_or_else(|| {
+                            BamlRtError::InvalidArgument(
+                                "Missing 'token_address' in params".to_string(),
+                            )
+                        })?;
                 self.query_token_price(network, token_address).await?
             }
-            ("uniswap_v3", "filtered_pools") => {
-                let filters_json = params.get("filters").cloned().unwrap_or(json!({}));
-                let filters: QueryFilters = serde_json::from_value(filters_json)
-                    .map_err(|e| BamlRtError::InvalidArgument(format!("Invalid filters: {}", e)))?;
-                let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
+            ("uniswap_v3", GraphQueryType::FilteredPools) => {
+                let filters = params.and_then(|p| p.filters.clone()).unwrap_or_default();
+                let limit = params.and_then(|p| p.limit).unwrap_or(10);
                 self.query_filtered_pools(network, &filters, limit).await?
             }
-            ("uniswap_v3", "query_plan") => {
-                let plan_json = params.get("query_plan").ok_or_else(|| {
+            ("uniswap_v3", GraphQueryType::QueryPlan) => {
+                let plan = params.and_then(|p| p.query_plan.clone()).ok_or_else(|| {
                     BamlRtError::InvalidArgument("Missing 'query_plan' in params".to_string())
-                })?;
-                let plan: QueryPlan = serde_json::from_value(plan_json.clone()).map_err(|e| {
-                    BamlRtError::InvalidArgument(format!("Invalid query plan: {}", e))
                 })?;
                 self.execute_query_plan(&plan).await?
             }
             _ => {
                 return Err(BamlRtError::InvalidArgument(format!(
-                    "Unsupported query: {}/{}",
-                    protocol, query_type
+                    "Unsupported query: {}/{:?}",
+                    args.protocol, args.query_type
                 )))
             }
         };

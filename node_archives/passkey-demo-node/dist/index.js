@@ -19,12 +19,14 @@ if (!globalThis.__baml_chat_register) {
   };
 }
 
-// Host tool helper (agent-platform expects openToolSession for host tools)
+// Host tool helper (agent-platform expects openToolSession for host tools).
+// Note: This helper is duplicated across agent entrypoints; keep in sync.
 async function invokeHostTool(toolName, args, token) {
-  if (!token) {
+  const resolvedToken = token ?? globalThis.__baml_invocation_token;
+  if (!resolvedToken) {
     throw new Error("Missing invocation token");
   }
-  const session = await globalThis.openToolSession(toolName, token);
+  const session = await globalThis.openToolSession(toolName, resolvedToken);
   await session.send(args ?? {});
   let step = await session.continue();
   while (step && step.status === "streaming") {
@@ -55,6 +57,7 @@ function newMessage(text) {
 // Runs inside the QuickJS sandbox.
 async function onChatMessage(message) {
   const text = extractText(message);
+  // Pass explicit token from the message for stream calls; fallback to global token if present.
   const token = message.__baml_invocation_token;
 
   const address = await invokeTool("defi/wallet_derive_address", {}, token);
